@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract_protocols_trace_event.schema.json",
+  "type": "object",
+  "required": ["schema_version", "event_id", "case_id", "event_type", "created_at", "payload"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "event_id": { "type": "string" },
+    "case_id": { "type": "string" },
+    "event_type": { "type": "string" },
+    "created_at": { "type": "string" },
+    "phase": { "type": "string" },
+    "role": { "type": "string" },
+    "model": { "type": "string" },
+    "prompt_hash": { "type": "string" },
+    "payload": { "type": "object" },
+    "redaction_status": { "type": "string", "enum": ["not_needed", "redacted", "unknown"] }
+  },
+  "additionalProperties": false
+}

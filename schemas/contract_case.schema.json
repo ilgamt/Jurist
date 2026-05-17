@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract_case.schema.json",
+  "type": "object",
+  "required": ["schema_version", "case_id", "created_at", "status", "intake"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "case_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["created", "needs_clarification", "running", "awaiting_user_approval", "completed", "failed"]
+    },
+    "intake": {
+      "type": "object",
+      "required": ["user_side", "contract_type", "goal"],
+      "properties": {
+        "user_side": { "type": "string" },
+        "counterparty": { "type": "string" },
+        "contract_type": { "type": "string" },
+        "jurisdiction": { "type": "string" },
+        "goal": { "type": "string" },
+        "non_negotiables": { "type": "array", "items": { "type": "string" } },
+        "acceptable_fallbacks": { "type": "array", "items": { "type": "string" } },
+        "deadline": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "source_documents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source_document" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "source_document": {
+      "type": "object",
+      "required": ["document_id", "source_type", "title"],
+      "properties": {
+        "document_id": { "type": "string" },
+        "source_type": {
+          "type": "string",
+          "enum": ["local_text", "local_file", "google_doc", "google_drive_file"]
+        },
+        "title": { "type": "string" },
+        "version_label": { "type": "string" },
+        "content_hash": { "type": "string" },
+        "source_uri": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,84 @@
+{
+  "version": "0.1",
+  "default_cost_limit_usd": 10.0,
+  "model_runtime": {
+    "require_health_check_before_live_run": true,
+    "require_smoke_test_before_production": true,
+    "cost_guard": {
+      "enabled": true,
+      "default_case_limit_usd": 10.0,
+      "warn_at_fraction": 0.75,
+      "hard_stop_at_fraction": 1.0,
+      "role_limits_usd": {
+        "legal_evidence_researcher": 2.0,
+        "legal_reviewer": 3.0,
+        "contract_drafter": 2.0,
+        "negotiation_strategist": 1.0,
+        "risk_reviewer": 1.5,
+        "protocol_secretary": 0.5
+      },
+      "expensive_models_require_explicit_case_budget": [
+        "anthropic/claude-opus-4.7",
+        "gpt-5.4"
+      ]
+    }
+  },
+  "approval_required_for": [
+    "google_drive_write",
+    "google_docs_batch_update",
+    "google_drive_comment_insert",
+    "external_file_export",
+    "case_delete"
+  ],
+  "phases": [
+    "intake",
+    "source_ingestion",
+    "clause_extraction",
+    "legal_research",
+    "judicial_practice",
+    "legal_review",
+    "negotiation_review",
+    "draft_protocol",
+    "risk_review",
+    "revision",
+    "final_assembly",
+    "optional_export"
+  ],
+  "phase_roles": {
+    "legal_research": ["legal_evidence_researcher"],
+    "legal_review": ["legal_reviewer"],
+    "negotiation_review": ["negotiation_strategist"],
+    "draft_protocol": ["contract_drafter"],
+    "risk_review": ["risk_reviewer"],
+    "revision": ["legal_reviewer", "contract_drafter"],
+    "final_assembly": ["protocol_secretary"]
+  },
+  "source_policy": {
+    "legal_claims_require_sources": true,
+    "preferred_russian_sources": [
+      "pravo.gov.ru",
+      "publication.pravo.gov.ru",
+      "xn--80ajghhoc2aj1c8b.xn--p1ai",
+      "kad.arbitr.ru",
+      "ras.arbitr.ru",
+      "arbitr.ru",
+      "my.arbitr.ru",
+      "vsrf.ru",
+      "sudrf.ru",
+      "sudact.ru"
+    ],
+    "secondary_sources_allowed": true,
+    "secondary_sources_require_label": true,
+    "commercial_legal_databases_allowed": false
+  },
+  "research_budget": {
+    "paid_providers_require_explicit_enable": true,
+    "max_damia_requests_per_case": 3,
+    "max_web_search_queries_per_case": 5,
+    "max_sources_per_legal_question": 2,
+    "max_pages_per_party_query": 1,
+    "max_cases_per_party_query": 5,
+    "require_scoped_query": true,
+    "allow_user_budget_override": true
+  }
+}

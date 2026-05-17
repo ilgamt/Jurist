@@ -1,0 +1,35 @@
+{
+  "version": "0.1",
+  "roles": {
+    "legal_evidence_researcher": {
+      "profile": "roles/legal_evidence_researcher.md",
+      "skill": "skills/legal_evidence_research.md",
+      "content_schema": "schemas/legal_evidence_pack.schema.json"
+    },
+    "legal_reviewer": {
+      "profile": "roles/legal_reviewer.md",
+      "skill": "skills/contract_review.md",
+      "content_schema": "schemas/role_response.schema.json"
+    },
+    "contract_drafter": {
+      "profile": "roles/contract_drafter.md",
+      "skill": "skills/disagreement_protocol_drafting.md",
+      "content_schema": "schemas/role_response.schema.json"
+    },
+    "negotiation_strategist": {
+      "profile": "roles/negotiation_strategist.md",
+      "skill": "skills/negotiation_positioning.md",
+      "content_schema": "schemas/role_response.schema.json"
+    },
+    "risk_reviewer": {
+      "profile": "roles/risk_reviewer.md",
+      "skill": "skills/legal_risk_review.md",
+      "content_schema": "schemas/role_response.schema.json"
+    },
+    "protocol_secretary": {
+      "profile": "roles/protocol_secretary.md",
+      "skill": "skills/protocol_assembly.md",
+      "content_schema": "schemas/role_response.schema.json"
+    }
+  }
+}

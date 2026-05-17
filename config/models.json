@@ -1,0 +1,83 @@
+{
+  "version": "0.1",
+  "runtime_allocation": {
+    "legal_evidence_researcher": {
+      "provider": "openrouter",
+      "model": "google/gemini-3.1-pro-preview",
+      "defaults": { "max_tokens": 8000 },
+      "verification_required_before_production": true
+    },
+    "legal_reviewer": {
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "defaults": { "max_output_tokens": 5000 },
+      "verification_required_before_production": true
+    },
+    "contract_drafter": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.7",
+      "defaults": { "max_tokens": 5000 },
+      "verification_required_before_production": true
+    },
+    "negotiation_strategist": {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "defaults": { "max_output_tokens": 3000 },
+      "escalation": {
+        "when": "high_value_or_complex_negotiation",
+        "provider": "openai",
+        "model": "gpt-5.4",
+        "defaults": { "max_output_tokens": 4000 }
+      },
+      "verification_required_before_production": true
+    },
+    "risk_reviewer": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.7",
+      "defaults": { "max_tokens": 4500 },
+      "verification_required_before_production": true
+    },
+    "protocol_secretary": {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "defaults": { "max_output_tokens": 3000 },
+      "verification_required_before_production": true
+    }
+  },
+  "fallbacks": {
+    "legal_evidence_researcher": [
+      { "provider": "openrouter", "model": "~google/gemini-flash-latest", "defaults": { "max_tokens": 4000 } },
+      { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 5000 } }
+    ],
+    "legal_reviewer": [
+      { "provider": "openrouter", "model": "anthropic/claude-opus-4.7", "defaults": { "max_tokens": 5000 } }
+    ],
+    "contract_drafter": [
+      { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 5000 } }
+    ],
+    "negotiation_strategist": [
+      { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 4000 } },
+      { "provider": "openrouter", "model": "anthropic/claude-sonnet-4.6", "defaults": { "max_tokens": 3500 } },
+      { "provider": "openrouter", "model": "anthropic/claude-opus-4.7", "defaults": { "max_tokens": 3500 } }
+    ],
+    "risk_reviewer": [
+      { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 4500 } }
+    ],
+    "protocol_secretary": [
+      { "provider": "openrouter", "model": "~google/gemini-flash-latest", "defaults": { "max_tokens": 3000 } }
+    ]
+  },
+  "pricing_per_million_tokens_usd": {
+    "gpt-5.4": { "input": 2.5, "cached_input": 0.25, "output": 15.0 },
+    "gpt-5.4-mini": { "input": 0.75, "cached_input": 0.075, "output": 4.5 },
+    "google/gemini-3.1-pro-preview": { "input": 2.0, "output": 12.0 },
+    "anthropic/claude-opus-4.7": { "input": 5.0, "output": 25.0 },
+    "anthropic/claude-sonnet-4.6": { "input": 3.0, "output": 15.0 }
+  },
+  "pricing_sources": {
+    "openai": "https://openai.com/api/pricing/",
+    "openrouter_claude_opus_4_7": "https://openrouter.ai/anthropic/claude-opus-4.7",
+    "openrouter_claude_sonnet_4_6": "https://openrouter.ai/anthropic/claude-sonnet-4.6/pricing",
+    "openrouter_gemini_3_1_pro_preview": "https://openrouter.ai/google/gemini-3.1-pro-preview"
+  }
+}

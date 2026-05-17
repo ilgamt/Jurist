@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "research_plan.schema.json",
+  "type": "object",
+  "required": ["schema_version", "case_id", "budget", "queries", "skipped_queries"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "case_id": { "type": "string" },
+    "budget": {
+      "type": "object",
+      "required": [
+        "max_damia_requests_per_case",
+        "max_web_search_queries_per_case",
+        "max_sources_per_legal_question",
+        "max_pages_per_party_query",
+        "max_cases_per_party_query"
+      ],
+      "properties": {
+        "max_damia_requests_per_case": { "type": "integer", "minimum": 0 },
+        "max_web_search_queries_per_case": { "type": "integer", "minimum": 0 },
+        "max_sources_per_legal_question": { "type": "integer", "minimum": 0 },
+        "max_pages_per_party_query": { "type": "integer", "minimum": 0 },
+        "max_cases_per_party_query": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "queries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/query" }
+    },
+    "skipped_queries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/skipped_query" }
+    }
+  },
+  "$defs": {
+    "query": {
+      "type": "object",
+      "required": ["query_id", "provider", "method", "purpose", "params", "limit", "why_needed"],
+      "properties": {
+        "query_id": { "type": "string" },
+        "provider": { "type": "string", "enum": ["damia", "open_web"] },
+        "method": { "type": "string" },
+        "purpose": { "type": "string" },
+        "params": { "type": "object" },
+        "limit": { "type": "integer", "minimum": 0 },
+        "why_needed": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "skipped_query": {
+      "type": "object",
+      "required": ["provider", "method", "reason"],
+      "properties": {
+        "provider": { "type": "string" },
+        "method": { "type": "string" },
+        "reason": { "type": "string" },
+        "candidate": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

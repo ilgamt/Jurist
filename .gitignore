@@ -1,0 +1,21 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+credentials/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Runtime data. Keep directory placeholders only.
+storage/cases/*
+!storage/cases/.gitkeep
+storage/input/*
+!storage/input/.gitkeep

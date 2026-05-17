@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract_protocols_role_response.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "case_id",
+    "role",
+    "phase",
+    "model",
+    "prompt_hash",
+    "summary",
+    "content",
+    "confidence",
+    "assumptions",
+    "risks",
+    "unknowns",
+    "open_questions"
+  ],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "case_id": { "type": "string" },
+    "role": {
+      "type": "string",
+      "enum": ["legal_evidence_researcher", "legal_reviewer", "contract_drafter", "negotiation_strategist", "risk_reviewer", "protocol_secretary"]
+    },
+    "phase": { "type": "string" },
+    "model": { "type": "string" },
+    "prompt_hash": { "type": "string" },
+    "summary": { "type": "string" },
+    "content": { "type": "object" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "string" } },
+    "unknowns": { "type": "array", "items": { "type": "string" } },
+    "open_questions": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

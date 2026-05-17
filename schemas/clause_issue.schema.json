@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clause_issue.schema.json",
+  "type": "object",
+  "required": ["issue_id", "clause_reference", "source_text", "issue_type", "risk_summary", "priority"],
+  "properties": {
+    "issue_id": { "type": "string" },
+    "clause_reference": { "type": "string" },
+    "source_text": { "type": "string" },
+    "issue_type": { "type": "string" },
+    "risk_summary": { "type": "string" },
+    "business_impact": { "type": "string" },
+    "recommended_action": { "type": "string" },
+    "priority": { "type": "string", "enum": ["must_have", "important", "negotiable"] },
+    "requires_lawyer_review": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}
