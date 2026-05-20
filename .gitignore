@@ -13,9 +13,14 @@ venv/
 dist/
 build/
 *.egg-info/
+logs/
 
 # Runtime data. Keep directory placeholders only.
 storage/cases/*
 !storage/cases/.gitkeep
 storage/input/*
 !storage/input/.gitkeep
+storage/telegram_audio/*
+storage/*.db
+storage/*.db-shm
+storage/*.db-wal

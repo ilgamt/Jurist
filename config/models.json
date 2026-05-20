@@ -10,13 +10,13 @@
     "legal_reviewer": {
       "provider": "openai",
       "model": "gpt-5.4",
-      "defaults": { "max_output_tokens": 5000 },
+      "defaults": { "max_output_tokens": 12000 },
       "verification_required_before_production": true
     },
     "contract_drafter": {
       "provider": "openrouter",
       "model": "anthropic/claude-opus-4.7",
-      "defaults": { "max_tokens": 5000 },
+      "defaults": { "max_tokens": 10000 },
       "verification_required_before_production": true
     },
     "negotiation_strategist": {
@@ -34,13 +34,13 @@
     "risk_reviewer": {
       "provider": "openrouter",
       "model": "anthropic/claude-opus-4.7",
-      "defaults": { "max_tokens": 4500 },
+      "defaults": { "max_tokens": 10000 },
       "verification_required_before_production": true
     },
     "protocol_secretary": {
       "provider": "openai",
       "model": "gpt-5.4-mini",
-      "defaults": { "max_output_tokens": 3000 },
+      "defaults": { "max_output_tokens": 9000 },
       "verification_required_before_production": true
     }
   },
@@ -50,10 +50,10 @@
       { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 5000 } }
     ],
     "legal_reviewer": [
-      { "provider": "openrouter", "model": "anthropic/claude-opus-4.7", "defaults": { "max_tokens": 5000 } }
+      { "provider": "openrouter", "model": "anthropic/claude-opus-4.7", "defaults": { "max_tokens": 12000 } }
     ],
     "contract_drafter": [
-      { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 5000 } }
+      { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 10000 } }
     ],
     "negotiation_strategist": [
       { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 4000 } },
@@ -61,10 +61,10 @@
       { "provider": "openrouter", "model": "anthropic/claude-opus-4.7", "defaults": { "max_tokens": 3500 } }
     ],
     "risk_reviewer": [
-      { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 4500 } }
+      { "provider": "openai", "model": "gpt-5.4", "defaults": { "max_output_tokens": 10000 } }
     ],
     "protocol_secretary": [
-      { "provider": "openrouter", "model": "~google/gemini-flash-latest", "defaults": { "max_tokens": 3000 } }
+      { "provider": "openrouter", "model": "~google/gemini-flash-latest", "defaults": { "max_tokens": 9000 } }
     ]
   },
   "pricing_per_million_tokens_usd": {

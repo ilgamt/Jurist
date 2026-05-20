@@ -2,7 +2,7 @@
 
 Date: 2026-05-13
 
-Updated: 2026-05-16
+Updated: 2026-05-20
 
 ## Decision
 
@@ -29,9 +29,10 @@ tools that can:
 - read existing comments on Docs, Sheets and Slides.
 
 The project also has a local Google OAuth client for Drive/Docs API access. The
-local runtime can create a native Google Doc, place it in a chosen Drive folder
-or next to a source Drive file by parent id, write protocol text through the
-Google Docs API, and verify the content by readback.
+local runtime can read a source Google Docs file, store source metadata and
+content hash, create native Google Docs next to the source file by parent id,
+write protocol/report text through the Google Docs API, and verify the content
+by readback.
 
 The installed Google Drive comments skill describes a write-comments workflow,
 but the currently visible callable tool list in this session does not expose a
@@ -49,7 +50,7 @@ or confirms the exact document.
 Required checks:
 
 - verify document identity;
-- fetch text and structure through the connector;
+- fetch text through the local Google Drive/Docs API integration;
 - store source metadata and content hash;
 - preserve exact quoted text for every protocol item.
 
@@ -59,9 +60,14 @@ The service may generate a protocol as a local DOCX/Markdown artifact and then
 import it to Drive as a native Google Doc, if the required document tooling is
 available.
 
-Current MVP export creates a native Google Doc directly and writes
-`final_protocol.md` into it. It can target an explicit Drive folder id or use the
-parent folder of a source Drive file id.
+Current MVP export creates native Google Docs directly from Markdown/HTML. For
+Telegram checks it exports exactly two documents next to the source Drive file:
+
+- протокол разногласий;
+- отчет по работе.
+
+Existing exported protocol documents may be updated in place when the system
+fixes post-run formatting or normalization defects, with readback verification.
 
 ### Edit An Existing Google Doc
 

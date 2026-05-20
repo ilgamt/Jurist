@@ -1076,9 +1076,13 @@ def normalize_disagreement_item(item: dict, index: int) -> dict:
         "clause_reference": str(item.get("clause_reference") or item.get("clause_id") or "not_set"),
         "current_wording": str(
             item.get("current_wording")
+            or item.get("current_text")
             or item.get("counterparty_wording")
             or item.get("counterparty_text")
             or item.get("contractor_version")
+            or item.get("original_wording")
+            or item.get("original_text")
+            or item.get("original_clause_text")
             or item.get("source_text")
             or ""
         ),
@@ -1090,8 +1094,20 @@ def normalize_disagreement_item(item: dict, index: int) -> dict:
             or item.get("recommended_action")
             or ""
         ),
-        "rationale": str(item.get("rationale") or item.get("negotiation_note") or ""),
-        "risk_if_unchanged": str(item.get("risk_if_unchanged") or item.get("risk_summary") or item.get("rationale") or ""),
+        "rationale": str(
+            item.get("rationale")
+            or item.get("rationale_for_executor")
+            or item.get("justification")
+            or item.get("negotiation_note")
+            or ""
+        ),
+        "risk_if_unchanged": str(
+            item.get("risk_if_unchanged")
+            or item.get("risk_summary")
+            or item.get("rationale")
+            or item.get("rationale_for_executor")
+            or ""
+        ),
         "priority": priority,
         "fallback_position": str(item.get("fallback_position") or item.get("negotiation_note") or ""),
         "evidence_refs": string_items(item.get("evidence_refs")),

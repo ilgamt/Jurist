@@ -26,6 +26,8 @@ class CostGuardError(ModelRuntimeError):
 class CostGuard:
     case_limit_usd: float
     role_limits_usd: dict[str, float]
+    explicit_case_budget: bool = False
+    expensive_models_require_explicit_budget: set[str] = field(default_factory=set)
     spent_usd: float = 0.0
     by_role: dict[str, float] = field(default_factory=dict)
 
@@ -35,7 +37,17 @@ class CostGuard:
         return cls(
             case_limit_usd=float(case_budget_usd or guard.get("default_case_limit_usd", 10.0)),
             role_limits_usd={key: float(value) for key, value in guard.get("role_limits_usd", {}).items()},
+            explicit_case_budget=case_budget_usd is not None,
+            expensive_models_require_explicit_budget={
+                str(model) for model in guard.get("expensive_models_require_explicit_case_budget", [])
+            },
         )
+
+    def check_model_allowed(self, model: str) -> None:
+        if model in self.expensive_models_require_explicit_budget and not self.explicit_case_budget:
+            raise CostGuardError(
+                f"Explicit case budget is required before using expensive model: {model}."
+            )
 
     def record(self, role: str, cost_usd: float | None) -> None:
         if cost_usd is None:
@@ -75,6 +87,8 @@ class LiveModelClient:
         for allocation in self.allocations_for_role(role):
             try:
                 return self.complete_with_allocation(request, allocation)
+            except CostGuardError:
+                raise
             except ModelRuntimeError as error:
                 errors.append(
                     f"{allocation.get('provider')}/{allocation.get('model')}: {error}"
@@ -85,6 +99,7 @@ class LiveModelClient:
         role = request["role"]
         provider = allocation["provider"]
         model = allocation["model"]
+        self.cost_guard.check_model_allowed(model)
         prompt = build_live_prompt(request)
         if provider == "openai":
             text, usage = call_openai_responses(model, prompt, allocation.get("defaults", {}), self.timeout_seconds)
@@ -281,9 +296,9 @@ def parse_role_response_text(text: str, request: dict, model: str) -> dict:
 def normalize_role_response(payload: dict, request: dict, model: str) -> dict:
     content = payload.get("content")
     if not isinstance(content, dict):
-        content = fake_content(request)
+        raise ModelRuntimeError(f"Model response for {request['role']} did not include object content.")
     if request["phase"] == "final_assembly" and not isinstance(content.get("protocol"), dict):
-        content = fake_content(request)
+        raise ModelRuntimeError("Final assembly response did not include content.protocol object.")
     return {
         "schema_version": "0.1",
         "case_id": request["case"]["case_id"],

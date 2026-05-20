@@ -10,9 +10,13 @@ class ModelPolicyTest(unittest.TestCase):
         allocation = load_models()["runtime_allocation"]
 
         self.assertEqual(allocation["contract_drafter"]["model"], "anthropic/claude-opus-4.7")
+        self.assertGreaterEqual(allocation["contract_drafter"]["defaults"]["max_tokens"], 9000)
         self.assertEqual(allocation["protocol_secretary"]["model"], "gpt-5.4-mini")
+        self.assertGreaterEqual(allocation["protocol_secretary"]["defaults"]["max_output_tokens"], 8000)
         self.assertEqual(allocation["legal_reviewer"]["model"], "gpt-5.4")
+        self.assertGreaterEqual(allocation["legal_reviewer"]["defaults"]["max_output_tokens"], 10000)
         self.assertEqual(allocation["risk_reviewer"]["model"], "anthropic/claude-opus-4.7")
+        self.assertGreaterEqual(allocation["risk_reviewer"]["defaults"]["max_tokens"], 9000)
         self.assertEqual(allocation["legal_evidence_researcher"]["model"], "google/gemini-3.1-pro-preview")
         self.assertTrue(allocation["legal_evidence_researcher"]["verification_required_before_production"])
         self.assertIn("risk_reviewer", load_models()["fallbacks"])

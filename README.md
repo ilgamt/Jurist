@@ -176,6 +176,17 @@ PYTHONPATH=src python3 -m contract_protocols.cli google-doc-export latest \
   --source-file-id <SOURCE_GOOGLE_DRIVE_FILE_ID>
 ```
 
+## Telegram Intake
+
+The internal MVP Telegram bot accepts approved team members only. It collects a
+Google Docs/Drive link and review context, then returns exactly two Google Docs:
+the disagreement protocol and the work report.
+
+Operational details live in `notes/11_telegram_service_runbook.md`. On macOS the
+recommended local runtime uses two launchd agents: one intake process that polls
+Telegram, and one worker process that claims ready requests and runs live checks
+with an explicit case budget.
+
 ## Open Sources
 
 The service uses scoped source calls only. It does not run broad unlimited scraping. Research calls are budgeted in `config/policy.json`, and each case writes `research_plan.json` before source execution.

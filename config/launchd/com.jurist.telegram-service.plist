@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jurist.telegram-service</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ilgam/Jurist/.venv/bin/jurist</string>
+    <string>telegram-service</string>
+    <string>--poll-timeout</string>
+    <string>5</string>
+    <string>--intake-only</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/ilgam/Jurist</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/ilgam/Jurist/logs/telegram-service.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/ilgam/Jurist/logs/telegram-service.err.log</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+</dict>
+</plist>

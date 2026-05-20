@@ -154,6 +154,13 @@ Done criteria:
 - [x] Implement fallback handling.
 - [x] Run live smoke tests for each role.
 - [x] Replace fixed eval-set requirement with per-run quality gate.
+- [x] Fail closed when live model responses do not match required content schema.
+- [x] Stop live runs on cost-guard errors instead of falling through to fallback models.
+- [x] Require explicit per-case budget before using configured expensive models.
+- [x] Increase final-assembly output budget so large protocols do not fail on truncated JSON.
+- [x] Increase long-form legal review, drafting and risk-review output budgets to avoid truncated JSON.
+- [x] Accept model protocol aliases such as `original_text` and `rationale_for_executor`
+  so exported protocols keep "Текущая редакция" and "Обоснование" populated.
 - [ ] Add automated post-run quality report.
 
 Done criteria:
@@ -165,18 +172,20 @@ Done criteria:
 
 ## Phase 5. Google Drive Read And Export
 
-- [ ] Implement Google Docs source intake by URL.
-- [ ] Store Google document metadata and content hash.
-- [ ] Generate a local protocol artifact from Google Docs source text.
+- [x] Implement Google Docs source intake by URL.
+- [x] Store Google document metadata and content hash.
+- [x] Generate a local protocol artifact from Google Docs source text.
 - [x] Export final protocol as a new native Google Doc.
 - [x] Place exported Google Doc in an explicit folder or next to a source Drive file.
 - [x] Add Google Docs API readback verification.
+- [x] Export exactly two Google Docs for Telegram checks: disagreement protocol and work report.
+- [x] Update existing exported protocol when a post-run formatting/data fix is applied.
 
 Done criteria:
 
-- [ ] User can provide a Google Docs URL and receive a protocol artifact.
+- [x] User can provide a Google Docs URL and receive a protocol artifact.
 - [x] User can approve creation of a new Google Docs protocol.
-- [ ] Exact target document identity is verified before every write.
+- [~] Exact target document identity is verified before every write.
 
 ## Phase 6. Google Drive Comments And Edits
 
@@ -221,3 +230,60 @@ Done criteria:
 - [x] Tests pass.
 - [x] Sensitive local traces are ignored by git.
 - [ ] Google Drive writes are impossible without explicit approval.
+
+## Phase 9. Telegram Intake Bot And Durable Registry
+
+- [x] Agree MVP scope: Russian-only bot for internal team members.
+- [x] Agree access policy: bot accepts tasks only from approved Telegram users.
+- [x] Agree workflow policy: no separate owner confirmation before starting a check.
+- [x] Agree research policy: bot uses only free/open legal sources in MVP.
+- [x] Agree portability requirement: project must run after moving to another Mac.
+- [x] Choose durable local database for several hundred contracts: SQLite in `storage/jurist.db`.
+- [x] Add SQLite schema for approved users, Telegram requests, answers, results and bot events.
+- [x] Add internal question blocks and question registry for the Telegram intake scenario.
+- [x] Store current scenario cursor on each Telegram request.
+- [x] Store raw input, voice transcript, normalized final answer, completeness score and interpretation metadata.
+- [x] Store follow-up clarifications separately from the primary answer.
+- [x] Add block summaries and AI usage event tables for future analytics.
+- [x] Add CLI commands to initialize the database and approve/block bot users.
+- [x] Add CLI commands to inspect incoming requests and their status.
+- [x] Add Telegram bot intake flow:
+  - accept Google Docs/Drive link;
+  - ask contract type;
+  - ask our side;
+  - ask review goal and key risk focus;
+  - create a queued request.
+- [x] Connect queued request to the existing contract-review pipeline.
+- [x] Return exactly two Google Docs links after completion:
+  - протокол разногласий;
+  - отчет по работе.
+- [ ] Add dashboard section for user approvals and request monitoring.
+- [x] Add setup notes for migration to Mac Studio.
+- [x] Add tests for database schema, access policy and request lifecycle.
+- [x] Configure local Telegram token for the first MVP test run.
+- [x] Clear old Telegram pending updates before the first MVP test run.
+- [x] Add safe informational Telegram dialog with `gpt-5.3-mini`.
+- [x] Add dialog scope prompt in `skills/telegram_contract_intake_dialog.md`.
+- [x] Add Telegram voice-message transcription with `gpt-4o-mini-transcribe`.
+- [x] Hide raw transcription text from users and route voice input directly into the dialog/intake flow.
+- [x] Name the bot persona Margo/Марго and update tone of voice.
+- [x] Allow natural-language start phrases instead of requiring `/new`.
+- [x] Store processed Telegram `update_id` values to avoid duplicate handling after restart.
+- [x] Claim ready Telegram requests atomically before processing to avoid duplicate live runs.
+- [x] Return safe user-facing failure messages without leaking raw provider errors.
+- [x] Delete downloaded Telegram voice files immediately after transcription.
+- [x] Split launchd runtime into intake agent and worker agent.
+- [x] Add explicit worker budget for live contract checks.
+- [x] Keep intake process alive on transient Telegram polling/network errors.
+- [x] Extract Google Docs/Drive links from natural free-form messages.
+- [x] Add deterministic structured interpretation pass for intake answers.
+- [x] Ask one short follow-up when an intake answer is incomplete.
+- [x] Run the first real end-to-end Telegram contract test.
+
+Done criteria:
+
+- [x] A non-approved Telegram user cannot create a review request.
+- [x] An approved user can submit a Google document link and receive two result links.
+- [x] Request history survives restart and machine transfer when `storage/jurist.db` is copied.
+- [x] Bot output does not create intermediate Google Docs files beyond the two approved documents.
+- [x] First real Telegram test returns valid Google Docs links.

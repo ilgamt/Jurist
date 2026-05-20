@@ -145,8 +145,9 @@ class OrchestratorTest(unittest.TestCase):
                 "items": [
                     {
                         "clause_reference": "1.1",
-                        "counterparty_text": "Редакция из договора",
+                        "original_text": "Редакция из договора",
                         "proposed_text": "Предлагаемая редакция",
+                        "rationale_for_executor": "Обоснование для исполнителя",
                     }
                 ]
             },
@@ -155,6 +156,7 @@ class OrchestratorTest(unittest.TestCase):
 
         self.assertEqual(protocol["items"][0]["current_wording"], "Редакция из договора")
         self.assertEqual(protocol["items"][0]["proposed_wording"], "Предлагаемая редакция")
+        self.assertEqual(protocol["items"][0]["rationale"], "Обоснование для исполнителя")
 
     def test_no_unrelated_domain_imports_in_contract_package(self):
         root = service_path("src", "contract_protocols")

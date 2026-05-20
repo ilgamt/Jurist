@@ -8,6 +8,7 @@ Jurist uses separate local storage:
 
 ```text
 storage/cases/<case_id>/
+storage/jurist.db
 ```
 
 It must not write outside its own `storage/` tree unless the user explicitly approves an external export.
@@ -38,6 +39,39 @@ storage/cases/<case_id>/
     план_поиска.md
     google_drive_comments_plan.json
 ```
+
+## SQLite Registry
+
+Telegram intake and dashboard administration use a durable SQLite registry:
+
+```text
+storage/jurist.db
+```
+
+The database is local runtime data and is ignored by git. Copying this file is
+the expected migration path when the project moves to another Mac.
+
+Current tables:
+
+- `telegram_users`: bot users and approval status;
+- `telegram_requests`: submitted contract-review requests;
+- `telegram_request_answers`: intake answers collected by the bot;
+- `telegram_request_results`: final protocol/report Google Docs links;
+- `telegram_question_blocks`: internal scenario blocks for the bot interview;
+- `telegram_questions`: internal scenario questions and interpretation hints;
+- `telegram_structured_answers`: raw input, voice transcript, normalized final answer,
+  completeness score and interpretation metadata;
+- `telegram_followups`: one-question clarifications linked to a structured answer;
+- `telegram_block_summaries`: second-pass summaries for completed interview blocks;
+- `telegram_ai_usage_events`: model usage/cost events for dialog, interpretation and analytics;
+- `telegram_processed_updates`: Telegram update idempotency guard;
+- `bot_events`: bot/request audit events;
+- `schema_migrations`: local schema version.
+
+The user experience should stay conversational. The database, not the user, owns
+the structure: every intake message is mapped to the current scenario question
+and stored separately as raw text, transcript text when voice is used, and a
+normalized canonical answer for downstream processing.
 
 ## Trace Events
 

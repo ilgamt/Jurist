@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from contract_protocols import cli
@@ -118,6 +120,48 @@ class CLITest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["status"], "completed")
 
+    def test_telegram_user_and_request_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "jurist.db")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                init_code = cli.main(["telegram-db", "init", "--db-path", db_path])
+            self.assertEqual(init_code, 0)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                approve_code = cli.main(["telegram-users", "approve", "1001", "--db-path", db_path])
+            approved = json.loads(output.getvalue())
+            self.assertEqual(approve_code, 0)
+            self.assertEqual(approved["status"], "approved")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                create_code = cli.main(
+                    [
+                        "telegram-requests",
+                        "create",
+                        "--telegram-id",
+                        "1001",
+                        "--document-url",
+                        "https://docs.google.com/document/d/abc/edit",
+                        "--status",
+                        "collecting",
+                        "--db-path",
+                        db_path,
+                    ]
+                )
+            request = json.loads(output.getvalue())
+            self.assertEqual(create_code, 0)
+            self.assertEqual(request["telegram_id"], 1001)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                list_code = cli.main(["telegram-requests", "list", "--json", "--db-path", db_path])
+            listed = json.loads(output.getvalue())
+            self.assertEqual(list_code, 0)
+            self.assertEqual(len(listed["requests"]), 1)
+
     def test_run_live_model_config_error_returns_json(self):
         output = io.StringIO()
 
@@ -135,6 +179,8 @@ class CLITest(unittest.TestCase):
                     "Services agreement",
                     "--goal",
                     "Prepare protocol.",
+                    "--case-budget-usd",
+                    "10",
                 ]
             )
 

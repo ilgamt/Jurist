@@ -2,7 +2,7 @@
 
 Date: 2026-05-13
 
-Updated: 2026-05-16
+Updated: 2026-05-20
 
 ## Model Source Of Truth
 
@@ -22,7 +22,7 @@ Current model policy:
 - cost guard limits live runs by case and by role;
 - a fixed eval set is not required because contract topics vary widely.
 
-Current health-check status as of 2026-05-16:
+Current health-check status as of 2026-05-20:
 
 - OpenAI `gpt-5.4` works for `legal_reviewer`;
 - OpenAI `gpt-5.4-mini` works for `negotiation_strategist` and
@@ -34,6 +34,8 @@ Current health-check status as of 2026-05-16:
   `~google/gemini-flash-latest`;
 - OpenRouter `anthropic/claude-sonnet-4.6` currently fails the JSON
   health-check, so negotiation fallback continues to Claude Opus 4.7.
+- Long-form legal review, drafting, risk review and final assembly use increased
+  output budgets because large contracts can otherwise produce truncated JSON.
 
 ## Roles
 
@@ -158,6 +160,9 @@ Mission:
 - assemble final JSON and Markdown artifacts;
 - preserve dissent, assumptions and unresolved questions;
 - prepare export-ready tables.
+- tolerate common upstream aliases in protocol rows, including `original_text`,
+  `proposed_text` and `rationale_for_executor`, so the final protocol keeps the
+  source wording, proposed wording and rationale.
 
 Recommended model:
 
