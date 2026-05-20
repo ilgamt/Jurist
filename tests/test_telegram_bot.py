@@ -42,6 +42,7 @@ class FakeTelegramAPI:
         return b"voice-bytes"
 
 
+@patch.dict("os.environ", {"OPENAI_API_KEY": "", "TELEGRAM_INTAKE_AI_EXTRACTOR": "0"})
 class TelegramBotTest(unittest.TestCase):
     def test_validate_google_document_urls(self):
         self.assertTrue(validate_document_url("https://docs.google.com/document/d/1abcDEF_123/edit"))
@@ -69,12 +70,14 @@ class TelegramBotTest(unittest.TestCase):
                 "user_side": "Поручитель",
                 "goal": "Минимизировать финансовые последствия",
                 "risk_focus": "Объем ответственности и санкции",
+                "additional_context": "Поставка давальческих материалов заказчика",
             }
         )
 
         self.assertEqual(payload["contract_type"], "Договор поручительства")
         self.assertEqual(payload["user_side"], "Поручитель")
         self.assertIn("Особый фокус", payload["goal"])
+        self.assertIn("Контекст проверки", payload["goal"])
         self.assertTrue(payload["enable_web_search"])
         self.assertFalse(payload["enable_damia"])
 
@@ -223,6 +226,42 @@ class TelegramBotTest(unittest.TestCase):
             self.assertIn("финансовые риски", loaded["answers"]["goal"])
             self.assertIn("штрафы", loaded["answers"]["risk_focus"])
             self.assertIn("Заявка собрана", api.messages[-1]["text"])
+
+    def test_combined_intake_message_keeps_optional_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "jurist.db"
+            init_db(db_path)
+            upsert_user(1001, username="reviewer", db_path=db_path)
+            set_user_status(1001, "approved", db_path=db_path)
+            api = FakeTelegramAPI()
+
+            with patch(
+                "contract_protocols.telegram_bot.extract_intake_fields",
+                return_value={
+                    "document_url": "https://docs.google.com/document/d/1abcDEF_123/edit",
+                    "contract_type": "Договор на монтажные услуги",
+                    "user_side": "Заказчик",
+                    "goal": "Проверить соответствие законодательству",
+                    "risk_focus": "юридические и налоговые риски",
+                    "additional_context": "Давальческий материал заказчика: светильники",
+                },
+            ):
+                process_update(
+                    update_for_text("https://docs.google.com/document/d/1abcDEF_123/edit свободное описание договора"),
+                    api,
+                    db_path=db_path,
+                )
+
+            loaded = get_request(list_requests(db_path=db_path)[0]["id"], db_path=db_path)
+            self.assertEqual(loaded["status"], "ready")
+            self.assertEqual(loaded["answers"]["contract_type"], "Договор на монтажные услуги")
+            self.assertEqual(loaded["answers"]["additional_context"], "Давальческий материал заказчика: светильники")
+            context_answers = list_structured_answers(
+                loaded["id"],
+                question_key="additional_context",
+                db_path=db_path,
+            )
+            self.assertEqual(context_answers[0]["completeness_score"], 0.95)
 
     def test_voice_new_request_intent_gets_next_step_without_transcript_echo(self):
         with tempfile.TemporaryDirectory() as tmpdir:

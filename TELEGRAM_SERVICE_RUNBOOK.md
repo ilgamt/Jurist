@@ -25,6 +25,9 @@ Required `.env` values:
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_DB_PATH=storage/jurist.db
 TELEGRAM_DIALOG_MODEL=gpt-5.3-mini
+TELEGRAM_INTAKE_AI_EXTRACTOR=1
+TELEGRAM_INTAKE_EXTRACTOR_MODEL=gpt-5.3-mini
+TELEGRAM_INTAKE_EXTRACTOR_TIMEOUT_SECONDS=45
 TELEGRAM_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
 GOOGLE_OAUTH_CLIENT_FILE=/Users/ilgam/Jurist/credentials/google_oauth_client.json
 GOOGLE_OAUTH_TOKEN_FILE=/Users/ilgam/Jurist/credentials/google_token.json
@@ -35,7 +38,7 @@ OPENROUTER_API_KEY=...
 Current local status:
 
 - `.env` contains a Telegram bot token for the MVP test run;
-- `.env.example` documents `TELEGRAM_DIALOG_MODEL=gpt-5.3-mini`;
+- `.env.example` documents the Telegram dialog, intake extractor and transcription models;
 - `storage/jurist.db` contains the approved admin user `@ilgamt`;
 - old Telegram pending updates were cleared before the first end-to-end test;
 - the token should still be rotated in BotFather before broader internal use,
@@ -50,6 +53,8 @@ Current local status:
 - source documents can be native Google Docs or DOCX files stored in Google Drive;
 - users may send link, contract type, side, goal and risk focus in one text or
   voice message;
+- every free-form intake answer is first passed through the AI extractor, which
+  separates contract type, side, goal, risk focus and extra review context;
 - if some intake fields are missing, Margo asks for only the missing fields in
   one clarification instead of running a visible multi-question form;
 - voice messages are downloaded from Telegram, transcribed with OpenAI

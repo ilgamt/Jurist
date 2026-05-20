@@ -68,6 +68,7 @@ QUESTION_FLOW = (
         "Опиши риски, которые особенно важно убрать или ограничить.",
     ),
 )
+OPTIONAL_INTAKE_FIELDS = ("additional_context",)
 
 FIELD_LABELS = {
     "document_url": "ссылка на договор в Google Docs/Drive",
@@ -75,6 +76,7 @@ FIELD_LABELS = {
     "user_side": "наша сторона по договору",
     "goal": "цель проверки",
     "risk_focus": "риски или пункты, на которые особенно обратить внимание",
+    "additional_context": "контекст проверки",
 }
 
 FIELD_EXAMPLES = {
@@ -83,6 +85,7 @@ FIELD_EXAMPLES = {
     "user_side": "мы покупатель, поставщик, исполнитель",
     "goal": "подготовить протокол разногласий, снизить финансовые риски",
     "risk_focus": "штрафы, ответственность, сроки, расторжение",
+    "additional_context": "давальческий материал, особые условия сделки, коммерческий контекст",
 }
 
 START_COMMANDS = {"/start", "старт", "начать", "/help", "помощь"}
@@ -120,9 +123,16 @@ def parse_google_file_id(url: str) -> str:
 def build_intake_payload(answers: dict[str, str]) -> dict[str, Any]:
     goal = answers.get("goal", "").strip()
     risk_focus = answers.get("risk_focus", "").strip()
+    additional_context = answers.get("additional_context", "").strip()
     combined_goal = goal
     if risk_focus:
         combined_goal = f"{goal}. Особый фокус: {risk_focus}" if goal else f"Особый фокус: {risk_focus}"
+    if additional_context:
+        combined_goal = (
+            f"{combined_goal}. Контекст проверки: {additional_context}"
+            if combined_goal
+            else f"Контекст проверки: {additional_context}"
+        )
     return {
         "document_url": answers.get("document_url", "").strip(),
         "contract_type": answers.get("contract_type", "").strip(),
@@ -409,6 +419,31 @@ def handle_intake_answer(
             )
             updated = latest_request_for_user(request["telegram_id"], statuses=("collecting",), db_path=db_path) or updated
         accepted_keys.append(answer_key)
+
+    for optional_key in OPTIONAL_INTAKE_FIELDS:
+        optional_value = extracted_fields.get(optional_key, "").strip()
+        if not optional_value or updated.get("answers", {}).get(optional_key, "").strip():
+            continue
+        save_structured_answer(
+            request["id"],
+            request["telegram_id"],
+            optional_key,
+            answer_type=answer_type,
+            original_text=original_text or ("" if answer_type == "voice" else text),
+            transcript_text=transcript_text if answer_type == "voice" else "",
+            final_text=optional_value,
+            voice_file_id=voice_file_id,
+            completeness_score=0.95,
+            ai_metadata={
+                "mode": "ai_optional_context",
+                "question_key": optional_key,
+                "is_complete": True,
+                "should_advance": True,
+                "raw_candidate": optional_value,
+            },
+            db_path=db_path,
+        )
+        updated = set_request_answer(request["id"], optional_key, optional_value, db_path=db_path)
 
     missing = missing_required_answers(updated.get("answers", {}))
     if missing:

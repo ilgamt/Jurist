@@ -659,6 +659,24 @@ class CaseDashboardTest(unittest.TestCase):
                     VALUES (7, 'contract_type', 'Договор поставки', '2026-05-20T07:42:00+00:00')
                     """
                 )
+                connection.execute(
+                    """
+                    INSERT INTO telegram_request_answers(request_id, question_key, answer, created_at)
+                    VALUES (7, 'user_side', 'Покупатель', '2026-05-20T07:43:00+00:00')
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO telegram_request_answers(request_id, question_key, answer, created_at)
+                    VALUES (7, 'goal', 'Проверить штрафы и оплату', '2026-05-20T07:44:00+00:00')
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO telegram_request_answers(request_id, question_key, answer, created_at)
+                    VALUES (7, 'risk_focus', 'Сроки поставки и ответственность', '2026-05-20T07:45:00+00:00')
+                    """
+                )
 
             payload = build_cases_dashboard(root, limit=5, telegram_db_path=db_path)
             html = (root / "dashboard.html").read_text(encoding="utf-8")
@@ -698,8 +716,12 @@ class CaseDashboardTest(unittest.TestCase):
             self.assertNotIn("<th>Case</th>", requests_section)
             self.assertNotIn("case_admin", requests_section)
             self.assertIn("<th>Расход</th>", requests_section)
+            self.assertIn("<th>Условия проверки</th>", requests_section)
             self.assertIn("<td>нет данных</td>", requests_section)
             self.assertIn("Договор поставки", html)
+            self.assertIn("Покупатель", requests_section)
+            self.assertIn("Цель: Проверить штрафы и оплату; Риски: Сроки поставки и ответственность", requests_section)
+            self.assertEqual(payload["telegram_requests"][0]["review_conditions"], "Цель: Проверить штрафы и оплату; Риски: Сроки поставки и ответственность")
             self.assertIn("протокол", html)
             self.assertIn('data-hide-request-id="7"', html)
             self.assertIn('data-request-row="7"', html)

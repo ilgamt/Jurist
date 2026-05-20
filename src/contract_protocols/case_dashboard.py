@@ -369,6 +369,7 @@ def load_telegram_admin_data(db_path: Path) -> dict[str, Any]:
         request["contract_type"] = request_answers.get("contract_type", "")
         request["user_side"] = request_answers.get("user_side", "")
         request["goal"] = request_answers.get("goal", "")
+        request["review_conditions"] = request_review_conditions(request_answers)
     return {
         "users": users,
         "user_summary": dict(Counter(str(user.get("status") or "unknown") for user in users)),
@@ -384,6 +385,30 @@ def empty_telegram_admin_data() -> dict[str, Any]:
         "requests": [],
         "request_summary": {},
     }
+
+
+def request_review_conditions(answers: dict[str, str]) -> str:
+    labels = {
+        "goal": "Цель",
+        "risk_focus": "Риски",
+        "additional_context": "Контекст",
+    }
+    excluded = {"document_url", "contract_type", "user_side"}
+    parts = []
+    for key, value in answers.items():
+        if key in excluded:
+            continue
+        cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not cleaned:
+            continue
+        label = labels.get(key, human_answer_key(key))
+        parts.append(f"{label}: {cleaned}")
+    return "; ".join(parts)
+
+
+def human_answer_key(key: str) -> str:
+    cleaned = str(key or "").replace("_", " ").strip()
+    return cleaned[:1].upper() + cleaned[1:] if cleaned else "Условие"
 
 
 def read_hidden_request_ids(root: Path) -> set[int]:
@@ -574,18 +599,20 @@ def render_dashboard_markdown(payload: dict[str, Any]) -> str:
     if payload.get("telegram_requests"):
         lines.extend(
             [
-                "| ID | Статус | Пользователь | Тип | Case | Создана | Результат |",
-                "| ---: | --- | --- | --- | --- | --- | --- |",
+                "| ID | Статус | Пользователь | Тип | Сторона | Условия проверки | Расход | Создана | Результат |",
+                "| ---: | --- | --- | --- | --- | --- | ---: | --- | --- |",
             ]
         )
         for request in payload["telegram_requests"]:
             lines.append(
-                "| {id} | {status} | {user} | {contract_type} | {case_id} | {created} | {result} |".format(
+                "| {id} | {status} | {user} | {contract_type} | {user_side} | {conditions} | {cost} | {created} | {result} |".format(
                     id=request.get("id", ""),
                     status=md_cell(str(request.get("status") or "-")),
                     user=md_cell(user_display_name(request)),
                     contract_type=md_cell(str(request.get("contract_type") or "-")),
-                    case_id=md_cell(str(request.get("case_id") or "-")),
+                    user_side=md_cell(str(request.get("user_side") or "-")),
+                    conditions=md_cell(str(request.get("review_conditions") or "-")),
+                    cost=md_cell(format_request_cost(request)),
                     created=md_cell(short_dt(str(request.get("created_at") or ""))),
                     result=md_cell("готово" if request.get("protocol_doc_url") else "-"),
                 )
@@ -713,7 +740,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
     table {{
       border-collapse: collapse;
       font-size: 13px;
-      min-width: 760px;
+      min-width: 980px;
       width: 100%;
     }}
     th, td {{
@@ -729,6 +756,10 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       white-space: nowrap;
     }}
     td.muted {{ color: var(--muted); }}
+    .review-conditions {{
+      max-width: 280px;
+      min-width: 220px;
+    }}
     .status-pill {{
       background: #eef1f5;
       border-radius: 999px;
@@ -1019,7 +1050,7 @@ def render_requests_table(requests: list[dict[str, Any]], _summary: dict[str, in
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Статус</th><th>Пользователь</th><th>Тип</th><th>Сторона</th><th>Расход</th><th>Создана</th><th>Результат</th><th></th>
+              <th>ID</th><th>Статус</th><th>Пользователь</th><th>Тип</th><th>Сторона</th><th>Условия проверки</th><th>Расход</th><th>Создана</th><th>Результат</th><th></th>
             </tr>
           </thead>
           <tbody>{rows}</tbody>
@@ -1043,6 +1074,7 @@ def render_request_row(request: dict[str, Any]) -> str:
         f"<td>{escape(user_display_name(request))}<br><span class=\"muted\">{escape('@' + str(request.get('username')) if request.get('username') else str(request.get('telegram_id') or ''))}</span></td>"
         f"<td>{escape(str(request.get('contract_type') or '-'))}</td>"
         f"<td>{escape(str(request.get('user_side') or '-'))}</td>"
+        f"<td class=\"review-conditions\">{escape(str(request.get('review_conditions') or '-'))}</td>"
         f"<td>{escape(format_request_cost(request))}</td>"
         f"<td class=\"muted\">{escape(short_dt(str(request.get('created_at') or '')))}</td>"
         f"<td>{result}</td>"

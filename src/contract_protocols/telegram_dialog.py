@@ -16,6 +16,7 @@ GOOGLE_URL_PATTERN = re.compile(
     r"https://(?:docs|drive)\.google\.com/(?:document/d/|file/d/|drive/folders/)[A-Za-z0-9_-]+[^\s<>)]*",
     re.IGNORECASE,
 )
+INTAKE_FIELD_KEYS = ("document_url", "contract_type", "user_side", "goal", "risk_focus", "additional_context")
 
 SIDE_ALIASES = (
     ("поручител", "Поручитель"),
@@ -151,13 +152,14 @@ def extract_intake_fields(
         return {}
     missing = set(missing_fields)
     extracted: dict[str, str] = {}
+    extracted.update(extract_intake_fields_with_ai(text, missing_fields=missing_fields, current_question_key=current_question_key))
     if "document_url" in missing:
         match = GOOGLE_URL_PATTERN.search(cleaned)
         if match:
-            extracted["document_url"] = match.group(0).rstrip(".,;")
+            extracted.setdefault("document_url", match.group(0).rstrip(".,;"))
 
     for key, value in extract_labeled_intake_fields(text).items():
-        if key in missing and value and key not in extracted:
+        if (key in missing or key == "additional_context") and value and key not in extracted:
             extracted[key] = value
 
     remaining = GOOGLE_URL_PATTERN.sub(" ", cleaned)
@@ -187,15 +189,138 @@ def extract_intake_fields(
     return {key: value for key, value in extracted.items() if value.strip()}
 
 
+def extract_intake_fields_with_ai(
+    text: str,
+    *,
+    missing_fields: list[str] | tuple[str, ...],
+    current_question_key: str = "",
+    timeout_seconds: int = 45,
+) -> dict[str, str]:
+    if not should_use_ai_intake_extractor():
+        return {}
+    model = env_value("TELEGRAM_INTAKE_EXTRACTOR_MODEL", env_value("TELEGRAM_DIALOG_MODEL", DEFAULT_DIALOG_MODEL))
+    try:
+        timeout_seconds = int(env_value("TELEGRAM_INTAKE_EXTRACTOR_TIMEOUT_SECONDS", str(timeout_seconds)) or timeout_seconds)
+    except ValueError:
+        pass
+    base_url = env_value("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    prompt = build_intake_extraction_prompt(text, missing_fields=missing_fields, current_question_key=current_question_key)
+    try:
+        payload = post_json(
+            f"{base_url}/responses",
+            {
+                "model": model,
+                "input": prompt,
+                "text": {"format": {"type": "json_object"}},
+                "max_output_tokens": 900,
+            },
+            headers={"Authorization": f"Bearer {env_value('OPENAI_API_KEY')}"},
+            timeout_seconds=timeout_seconds,
+        )
+        parsed = parse_intake_extractor_response(extract_openai_text(payload))
+    except (ModelRuntimeError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    fields = parsed.get("fields") if isinstance(parsed, dict) else {}
+    if not isinstance(fields, dict):
+        fields = parsed if isinstance(parsed, dict) else {}
+    return sanitize_ai_intake_fields(fields, missing_fields=missing_fields)
+
+
+def should_use_ai_intake_extractor() -> bool:
+    if not env_value("OPENAI_API_KEY"):
+        return False
+    raw = env_value("TELEGRAM_INTAKE_AI_EXTRACTOR", "1").lower()
+    return raw not in {"0", "false", "no", "off", "disabled"}
+
+
+def build_intake_extraction_prompt(
+    text: str,
+    *,
+    missing_fields: list[str] | tuple[str, ...],
+    current_question_key: str = "",
+) -> str:
+    return "\n\n".join(
+        [
+            "Ты структурирующий агент Telegram-сервиса Jurist.",
+            "Извлеки из сообщения пользователя только данные для заявки на проверку договора.",
+            "Не придумывай значения. Если поле не указано явно или надежно не следует из текста, верни пустую строку.",
+            "Верни строго JSON без markdown в формате:",
+            json.dumps(
+                {
+                    "fields": {
+                        "document_url": "",
+                        "contract_type": "",
+                        "user_side": "",
+                        "goal": "",
+                        "risk_focus": "",
+                        "additional_context": "",
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            "Правила:",
+            "- document_url: только ссылка Google Docs/Drive.",
+            "- contract_type: короткая юридическая категория договора. Не включай сторону, цель, риски, материалы, товары, комментарии или соседние пункты. Примеры: 'Договор поставки', 'Договор на монтажные услуги', 'Договор поручительства'.",
+            "- user_side: нормализуй сторону клиента одним словом или короткой фразой: Заказчик, Исполнитель, Покупатель, Поставщик, Поручитель и т.п.",
+            "- goal: цель проверки, без перечня рисков и без типа договора.",
+            "- risk_focus: риски/пункты, на которые пользователь просит обратить внимание, без цели и типа договора.",
+            "- additional_context: прочая полезная информация о договоре или проверке, которая не является типом, стороной, целью или рисками.",
+            "Если пользователь написал 'тип договора - на монтажные услуги с нашим давальческим материалом...', то contract_type должен быть 'Договор на монтажные услуги', а давальческий материал уходит в additional_context.",
+            "Если пользователь смешал несколько пунктов в одной строке, аккуратно раздели их по смыслу.",
+            f"Сейчас не хватает обязательных полей: {json.dumps(list(missing_fields), ensure_ascii=False)}.",
+            f"Текущий ожидаемый вопрос: {current_question_key or '-'}",
+            "Сообщение пользователя:",
+            text.strip(),
+        ]
+    )
+
+
+def parse_intake_extractor_response(raw: str) -> dict[str, Any]:
+    text = raw.strip()
+    if not text:
+        return {}
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"\s*```$", "", text).strip()
+    return json.loads(text)
+
+
+def sanitize_ai_intake_fields(fields: dict[str, Any], *, missing_fields: list[str] | tuple[str, ...]) -> dict[str, str]:
+    allowed = set(missing_fields) | {"additional_context"}
+    cleaned: dict[str, str] = {}
+    for key in INTAKE_FIELD_KEYS:
+        if key not in allowed:
+            continue
+        value = fields.get(key)
+        if isinstance(value, list):
+            value = ", ".join(str(item) for item in value if str(item).strip())
+        value = clean_extracted_value(str(value or ""))
+        if not value:
+            continue
+        if key == "document_url":
+            match = GOOGLE_URL_PATTERN.search(value)
+            if not match:
+                continue
+            value = match.group(0).rstrip(".,;")
+        cleaned[key] = value
+    return cleaned
+
+
 def extract_labeled_intake_fields(text: str) -> dict[str, str]:
     labels = {
         "document_url": r"(?:ссылка|линк|url|документ)",
         "contract_type": r"(?:тип договора|тип)",
-        "user_side": r"(?:наша сторона|сторона клиента|сторона|мы)",
+        "user_side": r"(?:наша сторона(?:\s+по договору)?|сторона клиента|сторона(?:\s+по договору)?|мы)",
         "goal": r"(?:цель проверки|цель|задача|что нужно сделать)",
-        "risk_focus": r"(?:риски|риск|фокус|важно|на что обратить внимание)",
+        "risk_focus": (
+            r"(?:риски\s+или\s+пункты,\s+на\s+которые\s+особенно\s+обратить\s+внимание|"
+            r"риски|риск|фокус|важно|на что обратить внимание)"
+        ),
     }
-    label_pattern = re.compile(rf"(?P<label>{'|'.join(labels.values())})\s*[:\-—]", re.IGNORECASE)
+    label_pattern = re.compile(
+        rf"(?:^|[\n\r•*]+)\s*(?P<label>{'|'.join(labels.values())})\s*(?:[:\-—]|$)",
+        re.IGNORECASE,
+    )
     matches = list(label_pattern.finditer(text))
     extracted: dict[str, str] = {}
     for index, match in enumerate(matches):
@@ -208,7 +333,9 @@ def extract_labeled_intake_fields(text: str) -> dict[str, str]:
         if not key:
             continue
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        value = clean_extracted_value(text[match.end() : end])
+        value = clean_extracted_value(text[match.end("label") : end])
+        if key == "user_side":
+            value = canonical_side_from_text(value) or value
         if value:
             extracted[key] = value
     return extracted
@@ -287,6 +414,7 @@ def infer_risk_focus(text: str, *, current_question_key: str = "") -> str:
 
 def clean_extracted_value(text: str) -> str:
     value = re.sub(r"\s+", " ", text).strip(" \t\r\n-—:;,.")
+    value = re.sub(r"^[\-—:]\s*", "", value).strip()
     return value[:500].strip()
 
 
