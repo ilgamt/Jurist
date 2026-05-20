@@ -4,27 +4,26 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.jurist.telegram-worker</string>
+  <string>com.jurist.dashboard-admin</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/a1/Jurist/.venv/bin/jurist</string>
-    <string>telegram-service</string>
-    <string>--worker-only</string>
-    <string>--process-interval-seconds</string>
-    <string>5</string>
-    <string>--case-budget-usd</string>
-    <string>10</string>
+    <string>/Users/a1/Jurist/.venv/bin/python</string>
+    <string>/Users/a1/Jurist/scripts/jurist_dashboard_admin.py</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>8765</string>
   </array>
 
   <key>WorkingDirectory</key>
   <string>/Users/a1/Jurist</string>
 
   <key>StandardOutPath</key>
-  <string>/Users/a1/Jurist/logs/telegram-worker.out.log</string>
+  <string>/Users/a1/Jurist/logs/dashboard-admin.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/a1/Jurist/logs/telegram-worker.err.log</string>
+  <string>/Users/a1/Jurist/logs/dashboard-admin.err.log</string>
 
   <key>RunAtLoad</key>
   <true/>

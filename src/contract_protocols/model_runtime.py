@@ -335,6 +335,7 @@ def clamp_float(value: Any, *, default: float) -> float:
 def build_usage_metrics(model: str, usage: dict) -> dict[str, Any]:
     normalized_usage = normalize_usage(usage)
     cost = estimate_response_cost_usd(model, usage)
+    provider_cost = usage.get("provider_cost")
     return {
         "model": model,
         "provider": usage.get("provider", ""),
@@ -344,7 +345,7 @@ def build_usage_metrics(model: str, usage: dict) -> dict[str, Any]:
         "output_tokens": normalized_usage["output_tokens"],
         "total_tokens": normalized_usage["total_tokens"],
         "cost_usd": cost,
-        "provider_cost_usd": usage.get("provider_cost"),
+        "provider_cost_usd": float(provider_cost) if provider_cost is not None else None,
         "pricing_source": "config/models.json pricing_per_million_tokens_usd",
     }
 

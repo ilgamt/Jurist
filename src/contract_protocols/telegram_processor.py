@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from contract_protocols.case_dashboard import build_cases_dashboard
 from contract_protocols.google_drive_export import GoogleDriveExportError, export_case_outputs_to_google_drive
 from contract_protocols.google_drive_intake import GoogleDriveIntakeError, fetch_google_document_source
 from contract_protocols.model_runtime import LiveModelClient, ModelRuntimeError
@@ -81,6 +82,7 @@ def process_request(
             db_path=db_path,
         )
         update_request(request_id, status="completed", case_id=result["case_id"], db_path=db_path)
+        build_cases_dashboard()
         if notify:
             notify_request_completed(request, result)
         log_event(

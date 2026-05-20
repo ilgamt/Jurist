@@ -4,36 +4,32 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.jurist.telegram-service</string>
+  <string>com.jurist.watchdog</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/a1/Jurist/.venv/bin/jurist</string>
-    <string>telegram-service</string>
-    <string>--poll-timeout</string>
-    <string>5</string>
-    <string>--intake-only</string>
+    <string>/Users/a1/Jurist/scripts/jurist_watchdog.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
   <string>/Users/a1/Jurist</string>
 
   <key>StandardOutPath</key>
-  <string>/Users/a1/Jurist/logs/telegram-service.out.log</string>
+  <string>/Users/a1/Jurist/logs/watchdog.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/a1/Jurist/logs/telegram-service.err.log</string>
+  <string>/Users/a1/Jurist/logs/watchdog.err.log</string>
 
   <key>RunAtLoad</key>
   <true/>
 
-  <key>KeepAlive</key>
-  <true/>
+  <key>StartInterval</key>
+  <integer>300</integer>
 
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PYTHONUNBUFFERED</key>
-    <string>1</string>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 </dict>
 </plist>

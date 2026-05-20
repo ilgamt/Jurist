@@ -9,6 +9,7 @@ from contract_protocols.model_runtime import (
     CostGuardError,
     LiveModelClient,
     ModelRuntimeError,
+    build_usage_metrics,
     estimate_response_cost_usd,
     normalize_role_response,
 )
@@ -128,6 +129,21 @@ class ModelRuntimeTest(unittest.TestCase):
         )
 
         self.assertAlmostEqual(cost, 0.0031)
+
+    def test_usage_metrics_preserve_provider_cost(self):
+        metrics = build_usage_metrics(
+            "anthropic/claude-opus-4.7",
+            {
+                "provider": "openrouter",
+                "provider_cost": "0.0123",
+                "prompt_tokens": 1000,
+                "completion_tokens": 100,
+            },
+        )
+
+        self.assertEqual(metrics["provider"], "openrouter")
+        self.assertAlmostEqual(metrics["cost_usd"], 0.0123)
+        self.assertAlmostEqual(metrics["provider_cost_usd"], 0.0123)
 
     def test_live_client_tries_fallback_after_primary_failure(self):
         request = {

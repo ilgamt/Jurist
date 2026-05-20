@@ -98,7 +98,7 @@ class CLITest(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Сводный дашборд Jurist", output.getvalue())
-        self.assertIn("Последние договоры", output.getvalue())
+        self.assertIn("Отработанные договоры", output.getvalue())
 
     def test_provider_costs_command_prints_json(self):
         output = io.StringIO()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from collections import Counter
 from datetime import datetime
 from html import escape
@@ -12,13 +13,40 @@ from contract_protocols.config import service_path
 from contract_protocols.storage import atomic_write_json, atomic_write_text
 
 
-def build_cases_dashboard(cases_root: Path | None = None, *, limit: int = 25) -> dict[str, Any]:
+def build_cases_dashboard(
+    cases_root: Path | None = None,
+    *,
+    limit: int = 25,
+    telegram_db_path: Path | None = None,
+) -> dict[str, Any]:
     root = cases_root or service_path("storage", "cases")
+    resolved_telegram_db_path = telegram_db_path or service_path("storage", "jurist.db")
+    filesystem_rows = load_case_rows(root)
+    telegram_rows = (
+        load_telegram_request_rows(root, filesystem_rows, telegram_db_path=resolved_telegram_db_path)
+        if cases_root is None or telegram_db_path is not None
+        else []
+    )
+    telegram_admin = (
+        load_telegram_admin_data(resolved_telegram_db_path)
+        if cases_root is None or telegram_db_path is not None
+        else empty_telegram_admin_data()
+    )
+    hidden_request_ids = read_hidden_request_ids(root)
+    visible_requests = [
+        request
+        for request in telegram_admin["requests"]
+        if int(request.get("id") or 0) not in hidden_request_ids
+    ]
+    visible_request_summary = dict(Counter(str(request.get("status") or "unknown") for request in visible_requests))
     rows = sorted(
-        [row for row in load_case_rows(root) if not row.get("is_test_case")],
+        [row for row in [*filesystem_rows, *telegram_rows] if not row.get("is_test_case")],
         key=case_sort_key,
         reverse=True,
     )
+    attach_telegram_authors(rows, telegram_admin["requests"])
+    attach_request_costs(visible_requests, rows)
+    attach_user_contract_stats(telegram_admin["users"], telegram_admin["requests"], rows)
     for row in rows:
         atomic_write_text(Path(row["case_dir"]) / "case.html", render_case_page(row))
     summary = build_summary(rows)
@@ -29,6 +57,11 @@ def build_cases_dashboard(cases_root: Path | None = None, *, limit: int = 25) ->
         "summary": summary,
         "provider_billing": read_json(root / "provider_billing.json"),
         "recent_cases": select_dashboard_cases(rows, limit),
+        "telegram_users": telegram_admin["users"],
+        "telegram_user_summary": telegram_admin["user_summary"],
+        "telegram_requests": visible_requests,
+        "telegram_request_summary": visible_request_summary,
+        "hidden_telegram_request_ids": sorted(hidden_request_ids),
     }
     atomic_write_json(root / "dashboard.json", payload)
     atomic_write_text(root / "dashboard.md", render_dashboard_markdown(payload))
@@ -88,6 +121,9 @@ def load_case_rows(root: Path) -> list[dict[str, Any]]:
                 "google_doc_url": google_export.get("google_doc_url", "") or google_export.get("document_url", ""),
                 "google_folder_url": folder_url,
                 "cost_usd": trace_stats["cost_usd"],
+                "openai_cost_usd": trace_stats["openai_cost_usd"],
+                "openrouter_cost_usd": trace_stats["openrouter_cost_usd"],
+                "other_cost_usd": trace_stats["other_cost_usd"],
                 "cost_has_usage": trace_stats["cost_has_usage"],
                 "input_tokens": trace_stats["input_tokens"],
                 "cached_input_tokens": trace_stats["cached_input_tokens"],
@@ -106,6 +142,299 @@ def load_case_rows(root: Path) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def load_telegram_request_rows(
+    cases_root: Path,
+    filesystem_rows: list[dict[str, Any]],
+    *,
+    telegram_db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    db_path = telegram_db_path or service_path("storage", "jurist.db")
+    if not db_path.exists():
+        return []
+    existing_case_ids = {str(row.get("case_id") or "") for row in filesystem_rows}
+    try:
+        with sqlite3.connect(db_path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT
+                    r.id,
+                    r.case_id,
+                    r.status,
+                    r.document_url,
+                    r.created_at,
+                    r.started_at,
+                    r.completed_at,
+                    r.error_message,
+                    rr.protocol_doc_url,
+                    rr.work_report_doc_url,
+                    rr.google_folder_url
+                FROM telegram_requests r
+                LEFT JOIN telegram_request_results rr ON rr.request_id = r.id
+                WHERE r.case_id != ''
+                ORDER BY r.created_at DESC
+                """
+            ).fetchall()
+            answers = load_request_answers(connection)
+    except sqlite3.Error:
+        return []
+
+    result = []
+    for row in rows:
+        case_id = str(row["case_id"] or "")
+        if not case_id or case_id in existing_case_ids:
+            continue
+        request_answers = answers.get(int(row["id"]), {})
+        case_dir = cases_root / case_id
+        history = telegram_request_history(row)
+        result.append(
+            {
+                "case_id": case_id,
+                "created_at": row["created_at"] or "",
+                "status": row["status"] or "",
+                "contract_type": request_answers.get("contract_type", ""),
+                "display_name": contract_type_title(request_answers.get("contract_type", "")) or "Telegram-заявка",
+                "is_test_case": False,
+                "user_side": request_answers.get("user_side", ""),
+                "goal": request_answers.get("goal", ""),
+                "source_documents": 1 if row["document_url"] else 0,
+                "protocol_items": 0,
+                "must_have_items": 0,
+                "important_items": 0,
+                "sources": 0,
+                "source_gaps": 0,
+                "practice_cases": 0,
+                "practice_gaps": 0,
+                "google_doc_url": row["protocol_doc_url"] or "",
+                "work_report_doc_url": row["work_report_doc_url"] or "",
+                "google_folder_url": row["google_folder_url"] or "",
+                "document_url": row["document_url"] or "",
+                "cost_usd": 0.0,
+                "openai_cost_usd": 0.0,
+                "openrouter_cost_usd": 0.0,
+                "other_cost_usd": 0.0,
+                "cost_has_usage": False,
+                "input_tokens": 0,
+                "cached_input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "roles": [],
+                "models": [],
+                "events": len(history),
+                "history": history,
+                "case_dir": str(case_dir),
+                "case_mtime": timestamp_value(str(row["completed_at"] or row["created_at"] or "")),
+                "trace_path": "",
+                "summary_path": "",
+                "protocol_path": "",
+                "practice_path": "",
+                "recovered_from_telegram_db": True,
+            }
+        )
+    return result
+
+
+def attach_telegram_authors(case_rows: list[dict[str, Any]], requests: list[dict[str, Any]]) -> None:
+    requests_by_case_id: dict[str, dict[str, Any]] = {}
+    for request in requests:
+        case_id = str(request.get("case_id") or "")
+        if case_id and case_id not in requests_by_case_id:
+            requests_by_case_id[case_id] = request
+    for row in case_rows:
+        request = requests_by_case_id.get(str(row.get("case_id") or ""))
+        if not request:
+            continue
+        row["request_author_name"] = user_display_name(request)
+        row["request_author_username"] = str(request.get("username") or "")
+        row["request_author_telegram_id"] = str(request.get("telegram_id") or "")
+
+
+def attach_request_costs(requests: list[dict[str, Any]], case_rows: list[dict[str, Any]]) -> None:
+    cases_by_id = {str(row.get("case_id") or ""): row for row in case_rows}
+    for request in requests:
+        case_id = str(request.get("case_id") or "")
+        case_row = cases_by_id.get(case_id)
+        request["dashboard_cost_has_usage"] = bool(case_row and case_row.get("cost_has_usage"))
+        request["dashboard_cost_usd"] = float(case_row.get("cost_usd") or 0.0) if case_row else 0.0
+
+
+def attach_user_contract_stats(
+    users: list[dict[str, Any]],
+    requests: list[dict[str, Any]],
+    case_rows: list[dict[str, Any]],
+) -> None:
+    cases_by_id = {str(row.get("case_id") or ""): row for row in case_rows}
+    stats_by_user: dict[int, dict[str, Any]] = {}
+    for request in requests:
+        if request.get("status") != "completed":
+            continue
+        case_id = str(request.get("case_id") or "")
+        if not case_id:
+            continue
+        try:
+            telegram_id = int(request.get("telegram_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        stats = stats_by_user.setdefault(telegram_id, {"contracts_checked": 0, "cost_usd": 0.0, "cost_has_usage": False})
+        stats["contracts_checked"] += 1
+        case_row = cases_by_id.get(case_id)
+        if case_row and case_row.get("cost_has_usage"):
+            stats["cost_usd"] += float(case_row.get("cost_usd") or 0.0)
+            stats["cost_has_usage"] = True
+    for user in users:
+        try:
+            telegram_id = int(user.get("telegram_id") or 0)
+        except (TypeError, ValueError):
+            telegram_id = 0
+        stats = stats_by_user.get(telegram_id, {"contracts_checked": 0, "cost_usd": 0.0, "cost_has_usage": False})
+        user["contracts_checked"] = int(stats["contracts_checked"])
+        user["contracts_cost_usd"] = float(stats["cost_usd"])
+        user["contracts_cost_has_usage"] = bool(stats["cost_has_usage"])
+
+
+def load_request_answers(connection: sqlite3.Connection) -> dict[int, dict[str, str]]:
+    result: dict[int, dict[str, str]] = {}
+    rows = connection.execute(
+        """
+        SELECT request_id, question_key, answer
+        FROM telegram_request_answers
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    for row in rows:
+        result.setdefault(int(row["request_id"]), {})[str(row["question_key"])] = str(row["answer"] or "")
+    return result
+
+
+def load_telegram_admin_data(db_path: Path) -> dict[str, Any]:
+    if not db_path.exists():
+        return empty_telegram_admin_data()
+    try:
+        with sqlite3.connect(db_path) as connection:
+            connection.row_factory = sqlite3.Row
+            users = [dict(row) for row in connection.execute(
+                """
+                SELECT
+                    telegram_id,
+                    username,
+                    first_name,
+                    last_name,
+                    status,
+                    created_at,
+                    updated_at,
+                    last_seen_at,
+                    approved_at,
+                    approved_by
+                FROM telegram_users
+                ORDER BY
+                    CASE status WHEN 'approved' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+                    COALESCE(last_seen_at, updated_at, created_at) DESC
+                """
+            ).fetchall()]
+            requests = [dict(row) for row in connection.execute(
+                """
+                SELECT
+                    r.id,
+                    r.telegram_id,
+                    r.status,
+                    r.document_url,
+                    r.source_file_id,
+                    r.case_id,
+                    r.created_at,
+                    r.updated_at,
+                    r.started_at,
+                    r.completed_at,
+                    r.error_message,
+                    u.username,
+                    u.first_name,
+                    u.last_name,
+                    u.status AS user_status,
+                    rr.protocol_doc_url,
+                    rr.work_report_doc_url,
+                    rr.google_folder_url
+                FROM telegram_requests r
+                LEFT JOIN telegram_users u ON u.telegram_id = r.telegram_id
+                LEFT JOIN telegram_request_results rr ON rr.request_id = r.id
+                ORDER BY r.created_at DESC
+                """
+            ).fetchall()]
+            answers = load_request_answers(connection)
+    except sqlite3.Error:
+        return empty_telegram_admin_data()
+
+    for request in requests:
+        request_answers = answers.get(int(request["id"]), {})
+        request["contract_type"] = request_answers.get("contract_type", "")
+        request["user_side"] = request_answers.get("user_side", "")
+        request["goal"] = request_answers.get("goal", "")
+    return {
+        "users": users,
+        "user_summary": dict(Counter(str(user.get("status") or "unknown") for user in users)),
+        "requests": requests,
+        "request_summary": dict(Counter(str(request.get("status") or "unknown") for request in requests)),
+    }
+
+
+def empty_telegram_admin_data() -> dict[str, Any]:
+    return {
+        "users": [],
+        "user_summary": {},
+        "requests": [],
+        "request_summary": {},
+    }
+
+
+def read_hidden_request_ids(root: Path) -> set[int]:
+    payload = read_json(root / "dashboard_hidden_requests.json")
+    raw_ids = payload.get("hidden_request_ids") if isinstance(payload.get("hidden_request_ids"), list) else []
+    result = set()
+    for raw_id in raw_ids:
+        try:
+            result.add(int(raw_id))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def telegram_request_history(row: sqlite3.Row) -> list[dict[str, str]]:
+    history = [
+        {
+            "created_at": str(row["created_at"] or ""),
+            "event_type": "Создали Telegram-заявку",
+            "phase": "Вводные",
+            "role": "",
+            "model": "",
+            "summary": f"Заявка #{row['id']} сохранена в SQLite.",
+        }
+    ]
+    if row["started_at"]:
+        history.append(
+            {
+                "created_at": str(row["started_at"] or ""),
+                "event_type": "Запустили обработку заявки",
+                "phase": "Обработка",
+                "role": "",
+                "model": "",
+                "summary": "Worker забрал заявку в работу.",
+            }
+        )
+    if row["completed_at"]:
+        summary = "Заявка завершена, ссылки на Google Docs сохранены в SQLite."
+        if row["error_message"]:
+            summary = str(row["error_message"])
+        history.append(
+            {
+                "created_at": str(row["completed_at"] or ""),
+                "event_type": "Завершили Telegram-заявку",
+                "phase": "Экспорт",
+                "role": "",
+                "model": "",
+                "summary": summary,
+            }
+        )
+    return history
 
 
 def select_dashboard_cases(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
@@ -151,7 +480,9 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "completed_cases": len(completed),
         "google_exports": sum(1 for row in rows if row.get("google_doc_url")),
         "cost_usd": sum(row.get("cost_usd", 0.0) for row in rows),
-        "openai_cost_usd": sum(row.get("cost_usd", 0.0) for row in rows if any("gpt-" in model for model in row.get("models", []))),
+        "openai_cost_usd": sum(row.get("openai_cost_usd", 0.0) for row in rows),
+        "openrouter_cost_usd": sum(row.get("openrouter_cost_usd", 0.0) for row in rows),
+        "other_cost_usd": sum(row.get("other_cost_usd", 0.0) for row in rows),
         "cases_with_usage": sum(1 for row in rows if row.get("cost_has_usage")),
         "input_tokens": sum(row.get("input_tokens", 0) for row in rows),
         "cached_input_tokens": sum(row.get("cached_input_tokens", 0) for row in rows),
@@ -184,6 +515,8 @@ def render_dashboard_markdown(payload: dict[str, Any]) -> str:
         f"- запусков с готовым протоколом: {summary['completed_cases']}",
         f"- экспортов в Google Docs: {summary['google_exports']}",
         f"- учтенная стоимость моделей: ${summary['cost_usd']:.4f}",
+        f"- учтенная стоимость OpenAI: ${summary['openai_cost_usd']:.4f}",
+        f"- учтенная стоимость OpenRouter: ${summary['openrouter_cost_usd']:.4f}",
         f"- запусков с данными token usage: {summary['cases_with_usage']}",
         f"- токенов всего: {summary['total_tokens']}",
         f"- пунктов протоколов всего: {summary['protocol_items']}",
@@ -204,19 +537,20 @@ def render_dashboard_markdown(payload: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## Последние договоры",
+            "## Отработанные договоры",
             "",
-            "| Дата | Case ID | Тип | Сторона | Пункты | Стоимость | Токены | Источники | Практика | Google Doc |",
-            "| --- | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- |",
+            "| Дата | Case ID | Автор | Тип | Сторона | Пункты | Стоимость | Токены | Источники | Практика | Google Doc |",
+            "| --- | --- | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- |",
         ]
     )
     for row in payload["recent_cases"]:
         google = "[doc]({})".format(row["google_doc_url"]) if row["google_doc_url"] else ""
         lines.append(
-            "| {created} | `{case_id}` | {contract_type} | {user_side} | {items} | {cost} | {tokens} | {sources}/{gaps} | {practice}/{practice_gaps} | {google} |".format(
+            "| {created} | `{case_id}` | {author} | {contract_type} | {user_side} | {items} | {cost} | {tokens} | {sources}/{gaps} | {practice}/{practice_gaps} | {google} |".format(
                 created=md_cell(short_dt(row["created_at"])),
                 case_id=row["case_id"],
-                contract_type=md_cell(row["contract_type"] or "-"),
+                author=md_cell(format_case_author_text(row)),
+                contract_type=md_cell(row.get("display_name") or row["contract_type"] or "-"),
                 user_side=md_cell(row["user_side"] or "-"),
                 items=row["protocol_items"],
                 cost=md_cell(format_case_cost(row)),
@@ -228,20 +562,51 @@ def render_dashboard_markdown(payload: dict[str, Any]) -> str:
                 google=google,
             )
         )
+    lines.extend(["", "## Допущенные пользователи", ""])
+    approved_users = [user for user in payload.get("telegram_users", []) if user.get("status") == "approved"]
+    if approved_users:
+        for user in approved_users:
+            username = f", @{md_cell(str(user.get('username')))}" if user.get("username") else ""
+            lines.append(f"- {md_cell(user_display_name(user))}{username}")
+    else:
+        lines.append("- нет допущенных пользователей")
+    lines.extend(["", "## Договоры в работе", ""])
+    if payload.get("telegram_requests"):
+        lines.extend(
+            [
+                "| ID | Статус | Пользователь | Тип | Case | Создана | Результат |",
+                "| ---: | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for request in payload["telegram_requests"]:
+            lines.append(
+                "| {id} | {status} | {user} | {contract_type} | {case_id} | {created} | {result} |".format(
+                    id=request.get("id", ""),
+                    status=md_cell(str(request.get("status") or "-")),
+                    user=md_cell(user_display_name(request)),
+                    contract_type=md_cell(str(request.get("contract_type") or "-")),
+                    case_id=md_cell(str(request.get("case_id") or "-")),
+                    created=md_cell(short_dt(str(request.get("created_at") or ""))),
+                    result=md_cell("готово" if request.get("protocol_doc_url") else "-"),
+                )
+            )
+    else:
+        lines.append("- заявок нет")
     return "\n".join(lines) + "\n"
 
 
 def render_dashboard_html(payload: dict[str, Any]) -> str:
     summary = payload["summary"]
     provider_billing = payload.get("provider_billing") or {}
-    recent_links = "\n".join(render_case_link(row) for row in payload["recent_cases"])
+    users_table = render_users_table(payload.get("telegram_users", []), payload.get("telegram_user_summary", {}))
+    requests_table = render_requests_table(payload.get("telegram_requests", []), payload.get("telegram_request_summary", {}))
     generated_at = escape(payload["generated_at"])
     return f"""<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jurist Dashboard</title>
+  <title>Юридические проверки договоров</title>
   <style>
     :root {{
       color-scheme: light;
@@ -255,6 +620,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       --warn: #ad4e00;
       --warn-soft: #fff2df;
       --good: #276738;
+      --danger: #9b2424;
       --shadow: 0 10px 30px rgba(28, 37, 54, 0.08);
     }}
     * {{ box-sizing: border-box; }}
@@ -279,6 +645,15 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       justify-content: space-between;
       gap: 24px;
     }}
+    .header-metric {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-width: 220px;
+      padding: 10px 14px;
+      text-align: right;
+    }}
+    .header-metric .label {{ color: var(--muted); font-size: 12px; }}
+    .header-metric .value {{ font-size: 22px; font-weight: 760; margin-top: 2px; }}
     h1 {{ margin: 0; font-size: 28px; font-weight: 760; letter-spacing: 0; }}
     .subtle {{ color: var(--muted); font-size: 13px; margin-top: 6px; }}
     main {{ max-width: 1240px; margin: 0 auto; padding: 24px 24px 40px; }}
@@ -319,19 +694,75 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       white-space: nowrap;
     }}
     .chip small {{ color: var(--muted); margin-left: 5px; }}
-    .case-link-list {{ display: grid; gap: 8px; }}
-    .case-link {{
-      align-items: center;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      display: grid;
-      grid-template-columns: minmax(160px, 1fr) minmax(150px, auto) minmax(80px, auto);
-      gap: 12px;
-      padding: 10px 12px;
-      background: #fbfcfd;
-    }}
     .case-link-meta {{ color: var(--muted); font-size: 13px; }}
     .drive-folder-link {{ justify-self: end; }}
+    .admin-summary {{
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }}
+    .admin-summary span {{
+      background: #eef1f5;
+      border-radius: 999px;
+      padding: 4px 9px;
+    }}
+    .table-wrap {{ overflow-x: auto; }}
+    table {{
+      border-collapse: collapse;
+      font-size: 13px;
+      min-width: 760px;
+      width: 100%;
+    }}
+    th, td {{
+      border-bottom: 1px solid var(--line);
+      padding: 8px 9px;
+      text-align: left;
+      vertical-align: top;
+    }}
+    th {{
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }}
+    td.muted {{ color: var(--muted); }}
+    .status-pill {{
+      background: #eef1f5;
+      border-radius: 999px;
+      display: inline-block;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }}
+    .status-approved, .status-completed {{ background: #e7f3e8; color: #276738; }}
+    .status-pending, .status-running, .status-collecting, .status-ready {{ background: var(--warn-soft); color: var(--warn); }}
+    .status-blocked, .status-failed {{ background: #f8e4e4; color: #9b2424; }}
+    .access-toggle {{
+      align-items: center;
+      display: inline-flex;
+      gap: 7px;
+      white-space: nowrap;
+    }}
+    .access-toggle input {{ inline-size: 16px; block-size: 16px; }}
+    .access-state {{ color: var(--muted); font-size: 12px; margin-left: 6px; }}
+    .access-state.error {{ color: var(--danger); }}
+    .hide-request-button {{
+      align-items: center;
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      cursor: pointer;
+      display: inline-flex;
+      font-size: 15px;
+      height: 28px;
+      justify-content: center;
+      width: 32px;
+    }}
+    .hide-request-button:hover {{ border-color: var(--danger); color: var(--danger); }}
+    .hide-request-button:disabled {{ cursor: wait; opacity: 0.55; }}
     code {{
       background: #eef1f5;
       border-radius: 5px;
@@ -346,7 +777,6 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       main {{ padding: 16px; }}
       .title-row {{ align-items: flex-start; flex-direction: column; }}
       .stats {{ grid-template-columns: repeat(2, minmax(140px, 1fr)); }}
-      .case-link {{ grid-template-columns: 1fr; }}
     }}
     @media (max-width: 560px) {{
       .stats {{ grid-template-columns: 1fr; }}
@@ -358,29 +788,88 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
   <header>
     <div class="title-row">
       <div>
-        <h1>Jurist Dashboard</h1>
+        <h1>Юридические проверки договоров</h1>
         <div class="subtle">Сформировано: {generated_at}</div>
+      </div>
+      <div class="header-metric">
+        <div class="label">Расход OpenAI + OpenRouter, $</div>
+        <div class="value">{escape(format_contracts_total_cost(summary))}</div>
       </div>
     </div>
   </header>
   <main>
-    <div class="stats">
-      {render_stat("Запусков", summary["total_cases"])}
-      {render_stat("Договоров с итоговым протоколом", summary["completed_cases"])}
-      {render_stat("Стоимость OpenRouter, $", format_openrouter_total(provider_billing))}
-      {render_stat("Стоимость OpenAI, $", format_money_cents(summary["openai_cost_usd"]))}
-      {render_stat("Кейсов с usage", summary["cases_with_usage"])}
-      {render_stat("Пунктов протоколов", summary["protocol_items"])}
-      {render_stat("Источников", summary["sources"])}
-      {render_stat("Пробелов источников", summary["source_gaps"], warning=True)}
-    </div>
     {render_provider_billing_note(provider_billing)}
 
     <section>
-      <h2>Последние договоры</h2>
-      <div class="case-link-list">{recent_links}</div>
+      <h2>Допущенные пользователи</h2>
+      {users_table}
+    </section>
+    <section>
+      <h2>Договоры в работе</h2>
+      {requests_table}
     </section>
   </main>
+  <script>
+    const adminEndpoint = "http://127.0.0.1:8765";
+    document.querySelectorAll("[data-access-toggle]").forEach((checkbox) => {{
+      checkbox.addEventListener("change", async () => {{
+        const telegramId = checkbox.dataset.telegramId;
+        const state = document.querySelector(`[data-access-state="${{telegramId}}"]`);
+        const previous = !checkbox.checked;
+        checkbox.disabled = true;
+        if (state) {{
+          state.textContent = "сохраняю...";
+          state.classList.remove("error");
+        }}
+        try {{
+          const response = await fetch(`${{adminEndpoint}}/api/telegram-users/${{telegramId}}/access`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ approved: checkbox.checked }}),
+          }});
+          if (!response.ok) {{
+            throw new Error(`HTTP ${{response.status}}`);
+          }}
+          await response.json();
+          if (state) {{
+            state.textContent = "сохранено";
+          }}
+        }} catch (error) {{
+          checkbox.checked = previous;
+          if (state) {{
+            state.textContent = "не сохранено";
+            state.classList.add("error");
+          }}
+        }} finally {{
+          checkbox.disabled = false;
+        }}
+      }});
+    }});
+    document.querySelectorAll("[data-hide-request-id]").forEach((button) => {{
+      button.addEventListener("click", async () => {{
+        const requestId = button.dataset.hideRequestId;
+        const row = document.querySelector(`[data-request-row="${{requestId}}"]`);
+        button.disabled = true;
+        try {{
+          const response = await fetch(`${{adminEndpoint}}/api/dashboard/requests/${{requestId}}/hide`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ hidden: true }}),
+          }});
+          if (!response.ok) {{
+            throw new Error(`HTTP ${{response.status}}`);
+          }}
+          await response.json();
+          if (row) {{
+            row.remove();
+          }}
+        }} catch (error) {{
+          button.disabled = false;
+          button.title = "Не удалось убрать из дашборда";
+        }}
+      }});
+    }});
+  </script>
 </body>
 </html>
 """
@@ -421,6 +910,10 @@ def format_openrouter_total(payload: dict[str, Any]) -> str:
     return format_money_cents(float(openrouter.get("usage_usd") or 0.0))
 
 
+def format_contracts_total_cost(summary: dict[str, Any]) -> str:
+    return format_money_cents(float(summary.get("cost_usd") or 0.0))
+
+
 def render_chips(items: dict[str, int]) -> str:
     if not items:
         return '<span class="chip">нет данных</span>'
@@ -430,15 +923,58 @@ def render_chips(items: dict[str, int]) -> str:
     )
 
 
-def render_case_link(row: dict[str, Any]) -> str:
-    href = path_href(str(Path(row["case_dir"]) / "case.html"))
-    folder_link = render_google_folder_link(row)
-    title = escape(row.get("display_name", "") or row.get("contract_type", "") or row.get("case_id", ""))
-    return f"""<div class="case-link">
-      <span><a href="{href}"><strong>{title}</strong></a></span>
-      <span class="case-link-meta">{escape(short_dt(row.get("created_at", "")))}</span>
-      {folder_link}
+def render_recent_cases_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<div class="subtle">Договоров пока нет.</div>'
+    body = "\n".join(render_recent_case_row(row) for row in rows)
+    return f"""<div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Договор</th><th>Автор</th><th>Стоимость</th><th>OpenAI</th><th>OpenRouter</th><th>Дата</th><th>Результат</th>
+          </tr>
+        </thead>
+        <tbody>{body}</tbody>
+      </table>
     </div>"""
+
+
+def render_recent_case_row(row: dict[str, Any]) -> str:
+    href = path_href(str(Path(row["case_dir"]) / "case.html"))
+    title = escape(row.get("display_name", "") or row.get("contract_type", "") or row.get("case_id", ""))
+    return (
+        "<tr>"
+        f'<td><a href="{href}"><strong>{title}</strong></a></td>'
+        f"<td>{render_case_author(row)}</td>"
+        f"<td>{escape(format_labeled_case_total_cost(row))}</td>"
+        f"<td>{escape(format_labeled_provider_case_cost(row, 'OpenAI', 'openai_cost_usd'))}</td>"
+        f"<td>{escape(format_labeled_provider_case_cost(row, 'OpenRouter', 'openrouter_cost_usd'))}</td>"
+        f"<td class=\"muted\">{escape(short_dt(row.get('created_at', '')))}</td>"
+        f"<td>{render_google_folder_link(row)}</td>"
+        "</tr>"
+    )
+
+
+def render_case_author(row: dict[str, Any]) -> str:
+    name = str(row.get("request_author_name") or "").strip()
+    if not name:
+        return '<span class="muted">-</span>'
+    username = str(row.get("request_author_username") or "").strip()
+    telegram_id = str(row.get("request_author_telegram_id") or "").strip()
+    meta = f"@{username}" if username else telegram_id
+    if meta:
+        return f'{escape(name)}<br><span class="muted">{escape(meta)}</span>'
+    return escape(name)
+
+
+def format_case_author_text(row: dict[str, Any]) -> str:
+    name = str(row.get("request_author_name") or "").strip()
+    if not name:
+        return "-"
+    username = str(row.get("request_author_username") or "").strip()
+    telegram_id = str(row.get("request_author_telegram_id") or "").strip()
+    meta = f"@{username}" if username else telegram_id
+    return f"{name} ({meta})" if meta else name
 
 
 def render_google_folder_link(row: dict[str, Any]) -> str:
@@ -446,6 +982,134 @@ def render_google_folder_link(row: dict[str, Any]) -> str:
     if not folder_url:
         return '<span class="case-link-meta drive-folder-link"></span>'
     return f'<a class="drive-folder-link" href="{escape(folder_url, quote=True)}">Папка</a>'
+
+
+def render_users_table(users: list[dict[str, Any]], _summary: dict[str, int]) -> str:
+    if not users:
+        return '<div class="subtle">Пользователей пока нет.</div>'
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(user_display_name(user))}</td>"
+        f"<td>{render_access_checkbox(user)}</td>"
+        f"<td>{int(user.get('contracts_checked') or 0)}</td>"
+        f"<td>{escape(format_user_contract_cost(user))}</td>"
+        f"<td class=\"muted\">{escape(short_dt(str(user.get('last_seen_at') or '')))}</td>"
+        "</tr>"
+        for user in users
+    )
+    return f"""<div class="table-wrap">
+        <table>
+          <thead><tr><th>Имя</th><th>Доступ разрешен</th><th>Проверено договоров</th><th>Расход</th><th>Последний визит</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </div>"""
+
+
+def format_user_contract_cost(user: dict[str, Any]) -> str:
+    if not user.get("contracts_cost_has_usage"):
+        return "нет данных"
+    return f"${float(user.get('contracts_cost_usd') or 0.0):.4f}"
+
+
+def render_requests_table(requests: list[dict[str, Any]], _summary: dict[str, int]) -> str:
+    if not requests:
+        return '<div class="subtle">Заявок пока нет.</div>'
+    rows = "\n".join(render_request_row(request) for request in requests)
+    return f"""<div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Статус</th><th>Пользователь</th><th>Тип</th><th>Сторона</th><th>Расход</th><th>Создана</th><th>Результат</th><th></th>
+            </tr>
+          </thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </div>"""
+
+
+def render_request_row(request: dict[str, Any]) -> str:
+    result_links = []
+    if request.get("protocol_doc_url"):
+        result_links.append(f'<a href="{escape(str(request["protocol_doc_url"]), quote=True)}">протокол</a>')
+    if request.get("work_report_doc_url"):
+        result_links.append(f'<a href="{escape(str(request["work_report_doc_url"]), quote=True)}">отчет</a>')
+    if request.get("google_folder_url"):
+        result_links.append(f'<a href="{escape(str(request["google_folder_url"]), quote=True)}">папка</a>')
+    result = " · ".join(result_links) if result_links else escape(short_error(str(request.get("error_message") or "")) or "-")
+    return (
+        f'<tr data-request-row="{escape(str(request.get("id") or ""))}">'
+        f"<td><code>{escape(str(request.get('id') or ''))}</code></td>"
+        f"<td>{render_status(request.get('status'))}</td>"
+        f"<td>{escape(user_display_name(request))}<br><span class=\"muted\">{escape('@' + str(request.get('username')) if request.get('username') else str(request.get('telegram_id') or ''))}</span></td>"
+        f"<td>{escape(str(request.get('contract_type') or '-'))}</td>"
+        f"<td>{escape(str(request.get('user_side') or '-'))}</td>"
+        f"<td>{escape(format_request_cost(request))}</td>"
+        f"<td class=\"muted\">{escape(short_dt(str(request.get('created_at') or '')))}</td>"
+        f"<td>{result}</td>"
+        f"<td>{render_hide_request_button(request)}</td>"
+        "</tr>"
+    )
+
+
+def format_request_cost(request: dict[str, Any]) -> str:
+    if not request.get("dashboard_cost_has_usage"):
+        return "нет данных"
+    return f"${float(request.get('dashboard_cost_usd') or 0.0):.4f}"
+
+
+def render_hide_request_button(request: dict[str, Any]) -> str:
+    request_id = escape(str(request.get("id") or ""))
+    if not request_id:
+        return ""
+    return (
+        f'<button class="hide-request-button" type="button" data-hide-request-id="{request_id}" '
+        f'aria-label="Убрать договор из дашборда" title="Убрать из дашборда">&#128465;</button>'
+    )
+
+
+def render_access_checkbox(user: dict[str, Any]) -> str:
+    telegram_id = escape(str(user.get("telegram_id") or ""))
+    checked = " checked" if user.get("status") == "approved" else ""
+    return (
+        f'<label class="access-toggle">'
+        f'<input type="checkbox" data-access-toggle data-telegram-id="{telegram_id}"{checked}>'
+        f'<span>Доступ разрешен</span>'
+        f'</label><span class="access-state" data-access-state="{telegram_id}"></span>'
+    )
+
+
+def render_admin_summary(summary: dict[str, int]) -> str:
+    if not summary:
+        return '<div class="admin-summary"><span>нет данных</span></div>'
+    items = "\n".join(
+        f"<span>{escape(str(key))}: {int(value)}</span>"
+        for key, value in sorted(summary.items())
+    )
+    return f'<div class="admin-summary">{items}</div>'
+
+
+def render_status(status: Any) -> str:
+    value = str(status or "unknown")
+    safe_class = re.sub(r"[^a-z0-9_-]+", "-", value.lower())
+    return f'<span class="status-pill status-{escape(safe_class)}">{escape(value)}</span>'
+
+
+def user_display_name(row: dict[str, Any]) -> str:
+    name = " ".join(
+        part
+        for part in [str(row.get("first_name") or "").strip(), str(row.get("last_name") or "").strip()]
+        if part
+    ).strip()
+    if name:
+        return name
+    if row.get("username"):
+        return f"@{row['username']}"
+    return str(row.get("telegram_id") or "unknown")
+
+
+def short_error(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    return cleaned[:140] + "..." if len(cleaned) > 140 else cleaned
 
 
 def render_case_page(row: dict[str, Any]) -> str:
@@ -571,7 +1235,11 @@ def render_case_card(row: dict[str, Any]) -> str:
     if row.get("practice_path"):
         links.append(f'<a href="{path_href(row["practice_path"])}">практика</a>')
     if row.get("google_doc_url"):
-        links.append(f'<a href="{escape(row["google_doc_url"], quote=True)}">Google Doc</a>')
+        links.append(f'<a href="{escape(row["google_doc_url"], quote=True)}">протокол в Google Docs</a>')
+    if row.get("work_report_doc_url"):
+        links.append(f'<a href="{escape(row["work_report_doc_url"], quote=True)}">отчет в Google Docs</a>')
+    if row.get("document_url"):
+        links.append(f'<a href="{escape(row["document_url"], quote=True)}">исходный документ</a>')
     if row.get("trace_path"):
         links.append(f'<a href="{path_href(row["trace_path"])}">технический журнал</a>')
     file_links = " · ".join(links) if links else ""
@@ -647,7 +1315,34 @@ def format_money_cents(value: float) -> str:
 def format_case_cost(row: dict[str, Any]) -> str:
     if not row.get("cost_has_usage"):
         return "нет данных"
+    parts = [f"итого ${row.get('cost_usd', 0.0):.4f}"]
+    if row.get("openai_cost_usd", 0.0):
+        parts.append(f"OpenAI ${row.get('openai_cost_usd', 0.0):.4f}")
+    if row.get("openrouter_cost_usd", 0.0):
+        parts.append(f"OpenRouter ${row.get('openrouter_cost_usd', 0.0):.4f}")
+    if row.get("other_cost_usd", 0.0):
+        parts.append(f"other ${row.get('other_cost_usd', 0.0):.4f}")
+    return " · ".join(parts)
+
+
+def format_case_total_cost(row: dict[str, Any]) -> str:
+    if not row.get("cost_has_usage"):
+        return "нет данных"
     return f"${row.get('cost_usd', 0.0):.4f}"
+
+
+def format_labeled_case_total_cost(row: dict[str, Any]) -> str:
+    return f"Стоимость: {format_case_total_cost(row)}"
+
+
+def format_provider_case_cost(row: dict[str, Any], field: str) -> str:
+    if not row.get("cost_has_usage"):
+        return "нет данных"
+    return f"${row.get(field, 0.0):.4f}"
+
+
+def format_labeled_provider_case_cost(row: dict[str, Any], label: str, field: str) -> str:
+    return f"{label}: {format_provider_case_cost(row, field)}"
 
 
 def format_tokens(row: dict[str, Any]) -> str:
@@ -680,6 +1375,9 @@ def read_trace_stats(path: Path) -> dict[str, Any]:
     roles: Counter[str] = Counter()
     models: Counter[str] = Counter()
     cost_usd = 0.0
+    openai_cost_usd = 0.0
+    openrouter_cost_usd = 0.0
+    other_cost_usd = 0.0
     cost_has_usage = False
     input_tokens = 0
     cached_input_tokens = 0
@@ -711,11 +1409,22 @@ def read_trace_stats(path: Path) -> dict[str, Any]:
             total_tokens += int(usage.get("total_tokens") or 0)
             cost = usage.get("cost_usd")
             if cost is not None:
-                cost_usd += float(cost)
+                cost_value = float(cost)
+                cost_usd += cost_value
+                provider = infer_usage_provider(usage, event)
+                if provider == "openai":
+                    openai_cost_usd += cost_value
+                elif provider == "openrouter":
+                    openrouter_cost_usd += cost_value
+                else:
+                    other_cost_usd += cost_value
     return {
         "roles": list(roles.keys()),
         "models": list(models.keys()),
         "cost_usd": cost_usd,
+        "openai_cost_usd": openai_cost_usd,
+        "openrouter_cost_usd": openrouter_cost_usd,
+        "other_cost_usd": other_cost_usd,
         "cost_has_usage": cost_has_usage,
         "input_tokens": input_tokens,
         "cached_input_tokens": cached_input_tokens,
@@ -731,6 +1440,9 @@ def empty_trace_stats() -> dict[str, Any]:
         "roles": [],
         "models": [],
         "cost_usd": 0.0,
+        "openai_cost_usd": 0.0,
+        "openrouter_cost_usd": 0.0,
+        "other_cost_usd": 0.0,
         "cost_has_usage": False,
         "input_tokens": 0,
         "cached_input_tokens": 0,
@@ -739,6 +1451,18 @@ def empty_trace_stats() -> dict[str, Any]:
         "history": [],
         "events": 0,
     }
+
+
+def infer_usage_provider(usage: dict[str, Any], event: dict[str, Any]) -> str:
+    provider = str(usage.get("provider") or "").strip().lower()
+    if provider:
+        return provider
+    model = str(usage.get("model") or event.get("model") or "").strip().lower()
+    if model.startswith("gpt-") or model.startswith("o"):
+        return "openai"
+    if "/" in model or model.startswith("~"):
+        return "openrouter"
+    return ""
 
 
 def summarize_trace_event(event: dict[str, Any]) -> dict[str, str] | None:

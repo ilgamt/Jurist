@@ -59,9 +59,11 @@ class TelegramProcessorTest(unittest.TestCase):
                             ],
                         },
                     ):
-                        results = process_ready_requests(limit=1, db_path=db_path)
+                        with patch("contract_protocols.telegram_processor.build_cases_dashboard") as build_dashboard:
+                            results = process_ready_requests(limit=1, db_path=db_path)
 
             self.assertEqual(results[0]["status"], "completed")
+            build_dashboard.assert_called_once_with()
             loaded = get_request(request["id"], db_path=db_path)
             self.assertEqual(loaded["status"], "completed")
             self.assertEqual(loaded["case_id"], "case_1")
