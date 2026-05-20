@@ -69,9 +69,9 @@ Current tables:
 - `schema_migrations`: local schema version.
 
 The user experience should stay conversational. The database, not the user, owns
-the structure: every intake message is mapped to the current scenario question
-and stored separately as raw text, transcript text when voice is used, and a
-normalized canonical answer for downstream processing.
+the structure: an intake message may populate one or several required scenario
+fields. Each structured answer is stored separately as raw text, transcript text
+when voice is used, and a normalized canonical answer for downstream processing.
 
 ## Trace Events
 

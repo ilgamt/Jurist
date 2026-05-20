@@ -42,15 +42,16 @@ the active tool surface.
 
 ## Supported MVP Modes
 
-### Read From Google Docs
+### Read From Google Drive Sources
 
-The service may read a contract from a Google Docs URL after the user provides
-or confirms the exact document.
+The service may read a contract from a Google Docs/Drive URL after the user
+provides or confirms the exact document. Current Telegram intake supports native
+Google Docs and DOCX files stored in Google Drive.
 
 Required checks:
 
 - verify document identity;
-- fetch text through the local Google Drive/Docs API integration;
+- fetch text through the local Google Drive/Docs API integration or DOCX parser;
 - store source metadata and content hash;
 - preserve exact quoted text for every protocol item.
 

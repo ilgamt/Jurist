@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+jurist-env-transfer-*.tar.gz
+jurist-env-transfer-*.tar.gz.sha256
 credentials/
 __pycache__/
 *.py[cod]

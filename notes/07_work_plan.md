@@ -206,7 +206,7 @@ Done criteria:
 
 ## Phase 7. Document Formats
 
-- [ ] Add DOCX import path.
+- [x] Add DOCX import path for Google Drive source documents.
 - [ ] Add DOCX export path.
 - [ ] Add table formatting rules.
 - [ ] Add optional XLSX export for protocol tables.
@@ -249,15 +249,15 @@ Done criteria:
 - [x] Add CLI commands to inspect incoming requests and their status.
 - [x] Add Telegram bot intake flow:
   - accept Google Docs/Drive link;
-  - ask contract type;
-  - ask our side;
-  - ask review goal and key risk focus;
+  - extract contract type, our side, review goal and key risk focus from one
+    text or voice message when possible;
+  - ask only for missing or unclear fields;
   - create a queued request.
 - [x] Connect queued request to the existing contract-review pipeline.
 - [x] Return exactly two Google Docs links after completion:
   - протокол разногласий;
   - отчет по работе.
-- [ ] Add dashboard section for user approvals and request monitoring.
+- [x] Add dashboard section for user approvals and request monitoring.
 - [x] Add setup notes for migration to Mac Studio.
 - [x] Add tests for database schema, access policy and request lifecycle.
 - [x] Configure local Telegram token for the first MVP test run.
@@ -277,7 +277,10 @@ Done criteria:
 - [x] Keep intake process alive on transient Telegram polling/network errors.
 - [x] Extract Google Docs/Drive links from natural free-form messages.
 - [x] Add deterministic structured interpretation pass for intake answers.
-- [x] Ask one short follow-up when an intake answer is incomplete.
+- [x] Ask only for missing or unclear fields when intake data is incomplete.
+- [x] Add dashboard access toggles with Telegram notifications on grant/revoke.
+- [x] Add dashboard hiding for individual request rows without deleting database records.
+- [x] Add watchdog launchd agent for service health checks.
 - [x] Run the first real end-to-end Telegram contract test.
 
 Done criteria:

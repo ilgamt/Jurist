@@ -178,14 +178,14 @@ PYTHONPATH=src python3 -m contract_protocols.cli google-doc-export latest \
 
 ## Telegram Intake
 
-The internal MVP Telegram bot accepts approved team members only. It collects a
-Google Docs/Drive link and review context, then returns exactly two Google Docs:
-the disagreement protocol and the work report.
+The internal MVP Telegram bot accepts approved team members only. It accepts a
+native Google Docs source or a DOCX file stored in Google Drive, extracts review
+context from one text or voice message when possible, and returns exactly two
+Google Docs: the disagreement protocol and the work report.
 
 Operational details live in `notes/11_telegram_service_runbook.md`. On macOS the
-recommended local runtime uses two launchd agents: one intake process that polls
-Telegram, and one worker process that claims ready requests and runs live checks
-with an explicit case budget.
+recommended local runtime uses launchd agents for Telegram intake, the worker,
+the local dashboard admin API and a watchdog.
 
 ## Open Sources
 
