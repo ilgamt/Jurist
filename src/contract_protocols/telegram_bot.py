@@ -12,7 +12,7 @@ from typing import Any
 from contract_protocols.audio_transcription import transcribe_audio_file
 from contract_protocols.config import env_value, service_path
 from contract_protocols.model_runtime import ModelRuntimeError
-from contract_protocols.telegram_dialog import answer_dialog, greeting_text, interpret_intake_answer
+from contract_protocols.telegram_dialog import answer_dialog, extract_intake_fields, greeting_text, interpret_intake_answer
 from contract_protocols.telegram_db import (
     complete_followup,
     create_followup,
@@ -52,23 +52,38 @@ class IntakeQuestion:
 QUESTION_FLOW = (
     IntakeQuestion(
         "document_url",
-        "Отлично, начинаем. Пришли ссылку на договор в Google Docs или Google Drive. "
-        "Без текста договора я могу быть эффектной, но пользы будет подозрительно мало.",
+        "Пришли ссылку на договор в Google Docs или Google Drive.",
     ),
     IntakeQuestion(
         "contract_type",
-        "Ссылку приняла. Какой это тип договора? Например: поручительство, поставка, аренда, услуги.",
+        "Укажи тип договора: поручительство, поставка, аренда, услуги или другой.",
     ),
-    IntakeQuestion("user_side", "На чьей мы стороне по договору? Напиши коротко: покупатель, поставщик, поручитель и так далее."),
+    IntakeQuestion("user_side", "На чьей мы стороне по договору: покупатель, поставщик, поручитель и так далее."),
     IntakeQuestion(
         "goal",
-        "Какая цель проверки? Например: снизить финансовые риски, убрать личную ответственность, подготовить протокол разногласий.",
+        "Опиши цель проверки: снизить финансовые риски, убрать личную ответственность, подготовить протокол разногласий.",
     ),
     IntakeQuestion(
         "risk_focus",
-        "Какие риски особенно важно убрать или ограничить? Можно списком, можно голосом. Я разберу, бюрократия не пострадает.",
+        "Опиши риски, которые особенно важно убрать или ограничить.",
     ),
 )
+
+FIELD_LABELS = {
+    "document_url": "ссылка на договор в Google Docs/Drive",
+    "contract_type": "тип договора",
+    "user_side": "наша сторона по договору",
+    "goal": "цель проверки",
+    "risk_focus": "риски или пункты, на которые особенно обратить внимание",
+}
+
+FIELD_EXAMPLES = {
+    "document_url": "https://docs.google.com/...",
+    "contract_type": "договор поставки, поручительства, услуг",
+    "user_side": "мы покупатель, поставщик, исполнитель",
+    "goal": "подготовить протокол разногласий, снизить финансовые риски",
+    "risk_focus": "штрафы, ответственность, сроки, расторжение",
+}
 
 START_COMMANDS = {"/start", "старт", "начать", "/help", "помощь"}
 NEW_REQUEST_COMMANDS = {"/new", "новая заявка", "новый договор", "проверить договор"}
@@ -325,62 +340,88 @@ def handle_intake_answer(
     db_path: str | Path | None = None,
 ) -> bool:
     answers = dict(request.get("answers") or {})
-    key = next_missing_key(answers)
-    if not key:
+    missing = missing_required_answers(answers)
+    if not missing:
         api.send_message(chat_id, "Заявка уже собрана и ожидает обработки.")
         return True
+    key = str(request.get("current_question_key") or "") if request.get("current_question_key") in missing else missing[0]
     set_request_cursor(request["id"], current_question_key=key, db_path=db_path)
-    open_followup = latest_open_followup(request["id"], key, db_path=db_path)
-    previous_answer = latest_structured_answer(request["id"], key, db_path=db_path)
-    if open_followup:
-        complete_followup(open_followup["id"], text, db_path=db_path)
-    interpretation = interpret_intake_answer(
-        key,
-        text,
-        previous_answer=(previous_answer or {}).get("final_text", "") if open_followup else "",
-        followup_answer=text if open_followup else "",
-    )
-    structured_answer = save_structured_answer(
-        request["id"],
-        request["telegram_id"],
-        key,
-        answer_type=answer_type,
-        original_text=original_text or ("" if answer_type == "voice" else text),
-        transcript_text=transcript_text if answer_type == "voice" else "",
-        final_text=interpretation.normalized_answer,
-        voice_file_id=voice_file_id,
-        completeness_score=interpretation.completeness_score,
-        ai_metadata={
-            **interpretation.ai_metadata,
-            "is_complete": interpretation.is_complete,
-            "should_advance": interpretation.should_advance,
-        },
-        db_path=db_path,
-    )
-    if not interpretation.is_complete:
-        create_followup(
-            structured_answer["id"],
-            request["id"],
-            key,
-            interpretation.follow_up_question,
-            db_path=db_path,
-        )
-        api.send_message(chat_id, interpretation.follow_up_question)
+    extracted_fields = extract_intake_fields(text, missing_fields=missing, current_question_key=key)
+    if not extracted_fields:
+        api.send_message(chat_id, missing_answers_reply(missing, answers, no_fields=True))
         return True
 
-    updated = set_request_answer(request["id"], key, interpretation.normalized_answer, db_path=db_path)
-    if key == "document_url":
-        update_request(
+    updated = request
+    accepted_keys: list[str] = []
+    incomplete_keys: list[str] = []
+    for question in QUESTION_FLOW:
+        answer_key = question.key
+        if answer_key not in extracted_fields or answer_key not in missing:
+            continue
+        candidate_text = extracted_fields[answer_key]
+        open_followup = latest_open_followup(request["id"], answer_key, db_path=db_path)
+        previous_answer = latest_structured_answer(request["id"], answer_key, db_path=db_path)
+        if open_followup:
+            complete_followup(open_followup["id"], candidate_text, db_path=db_path)
+        interpretation = interpret_intake_answer(
+            answer_key,
+            candidate_text,
+            previous_answer=(previous_answer or {}).get("final_text", "") if open_followup else "",
+            followup_answer=candidate_text if open_followup else "",
+        )
+        structured_answer = save_structured_answer(
             request["id"],
-            document_url=interpretation.normalized_answer,
-            source_file_id=parse_google_file_id(interpretation.normalized_answer),
+            request["telegram_id"],
+            answer_key,
+            answer_type=answer_type,
+            original_text=original_text or ("" if answer_type == "voice" else text),
+            transcript_text=transcript_text if answer_type == "voice" else "",
+            final_text=interpretation.normalized_answer,
+            voice_file_id=voice_file_id,
+            completeness_score=interpretation.completeness_score,
+            ai_metadata={
+                **interpretation.ai_metadata,
+                "is_complete": interpretation.is_complete,
+                "should_advance": interpretation.should_advance,
+                "extracted_from_single_message": len(extracted_fields) > 1,
+                "raw_candidate": candidate_text,
+            },
             db_path=db_path,
         )
-        updated = latest_request_for_user(request["telegram_id"], statuses=("collecting",), db_path=db_path) or updated
+        if not interpretation.is_complete:
+            create_followup(
+                structured_answer["id"],
+                request["id"],
+                answer_key,
+                interpretation.follow_up_question,
+                db_path=db_path,
+            )
+            incomplete_keys.append(answer_key)
+            continue
+
+        updated = set_request_answer(request["id"], answer_key, interpretation.normalized_answer, db_path=db_path)
+        if answer_key == "document_url":
+            update_request(
+                request["id"],
+                document_url=interpretation.normalized_answer,
+                source_file_id=parse_google_file_id(interpretation.normalized_answer),
+                db_path=db_path,
+            )
+            updated = latest_request_for_user(request["telegram_id"], statuses=("collecting",), db_path=db_path) or updated
+        accepted_keys.append(answer_key)
+
     missing = missing_required_answers(updated.get("answers", {}))
     if missing:
         set_request_cursor(request["id"], current_question_key=missing[0], db_path=db_path)
-        api.send_message(chat_id, accepted_answer_reply(missing[0], updated.get("answers", {})))
+        api.send_message(
+            chat_id,
+            missing_answers_reply(
+                missing,
+                updated.get("answers", {}),
+                accepted_keys=accepted_keys,
+                incomplete_keys=incomplete_keys,
+            ),
+        )
         return True
 
     save_block_summary(
@@ -466,13 +507,43 @@ def accepted_answer_reply(next_key: str, answers: dict[str, str]) -> str:
 
 def start_request_reply(answers: dict[str, str], *, from_voice: bool = False) -> str:
     if answers:
-        return next_question_text(answers)
+        return missing_answers_reply(missing_required_answers(answers), answers)
     prefix = "Поняла: начинаем проверку нового договора." if from_voice else "Поняла: начинаем проверку нового договора."
     return (
         f"{prefix}\n\n"
-        "Что дальше: пришли ссылку на договор в Google Docs или Google Drive. "
-        "После ссылки я уточню тип договора, нашу сторону, цель проверки и риски, которые нужно прижать первыми."
+        "Пришли ссылку на договор и, если удобно, сразу остальное одним сообщением или голосом:\n"
+        "• тип договора;\n"
+        "• на чьей мы стороне;\n"
+        "• цель проверки;\n"
+        "• какие риски или пункты особенно важны.\n\n"
+        "Если чего-то не будет, я уточню только недостающие пункты."
     )
+
+
+def missing_answers_reply(
+    missing: list[str],
+    answers: dict[str, str],
+    *,
+    accepted_keys: list[str] | None = None,
+    incomplete_keys: list[str] | None = None,
+    no_fields: bool = False,
+) -> str:
+    if not missing:
+        return "Все данные собраны. Заявка ожидает обработки."
+    accepted_keys = accepted_keys or []
+    incomplete_keys = incomplete_keys or []
+    lead = "Приняла."
+    if no_fields:
+        lead = "Пока не могу уверенно разложить это по заявке."
+    elif accepted_keys:
+        accepted = ", ".join(FIELD_LABELS.get(key, key) for key in accepted_keys)
+        lead = f"Приняла: {accepted}."
+    if incomplete_keys:
+        lead += " По части ответа нужна конкретика."
+    missing_lines = "\n".join(f"• {FIELD_LABELS.get(key, key)}" for key in missing)
+    examples = "; ".join(FIELD_EXAMPLES[key] for key in missing if key in FIELD_EXAMPLES)
+    suffix = f"\n\nМожно ответить свободно одним сообщением или голосом. Например: {examples}." if examples else ""
+    return f"{lead}\n\nНе хватает:\n{missing_lines}{suffix}"
 
 
 def out_of_flow_reply(text: str, *, from_voice: bool = False) -> str:
@@ -480,8 +551,8 @@ def out_of_flow_reply(text: str, *, from_voice: bool = False) -> str:
         return start_request_reply({}, from_voice=True)
     if from_voice:
         return (
-            "Поняла запрос. Чтобы перейти от разговора к делу, пришли ссылку на договор в Google Docs или Google Drive. "
-            "Дальше я задам несколько коротких вопросов: тип договора, наша сторона, цель проверки и ключевые риски."
+            "Поняла запрос. Чтобы перейти от разговора к делу, пришли одним сообщением или голосом ссылку на договор, "
+            "тип договора, нашу сторону, цель проверки и ключевые риски."
         )
     return answer_dialog(
         text,

@@ -190,6 +190,40 @@ class TelegramBotTest(unittest.TestCase):
             self.assertEqual(loaded["answers"]["document_url"], "https://docs.google.com/document/d/1abcDEF_123/edit")
             self.assertNotIn("Распознал голосовое сообщение", "\n".join(message["text"] for message in api.messages))
 
+    def test_combined_intake_message_marks_request_ready(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "jurist.db"
+            init_db(db_path)
+            upsert_user(1001, username="reviewer", db_path=db_path)
+            set_user_status(1001, "approved", db_path=db_path)
+            api = FakeTelegramAPI()
+
+            process_update(
+                update_for_text(
+                    "\n".join(
+                        (
+                            "Ссылка: https://docs.google.com/document/d/1abcDEF_123/edit",
+                            "Тип договора: договор поставки",
+                            "Сторона: мы покупатель",
+                            "Цель: подготовить протокол разногласий и снизить финансовые риски",
+                            "Риски: штрафы, сроки и ответственность",
+                        )
+                    )
+                ),
+                api,
+                db_path=db_path,
+            )
+
+            requests = list_requests(db_path=db_path)
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0]["status"], "ready")
+            loaded = get_request(requests[0]["id"], db_path=db_path)
+            self.assertEqual(loaded["answers"]["contract_type"], "Договор поставки")
+            self.assertEqual(loaded["answers"]["user_side"], "Покупатель")
+            self.assertIn("финансовые риски", loaded["answers"]["goal"])
+            self.assertIn("штрафы", loaded["answers"]["risk_focus"])
+            self.assertIn("Заявка собрана", api.messages[-1]["text"])
+
     def test_voice_new_request_intent_gets_next_step_without_transcript_echo(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "jurist.db"

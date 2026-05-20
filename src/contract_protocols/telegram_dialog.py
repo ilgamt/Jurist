@@ -17,6 +17,62 @@ GOOGLE_URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+SIDE_ALIASES = (
+    ("поручител", "Поручитель"),
+    ("исполнител", "Исполнитель"),
+    ("заказчик", "Заказчик"),
+    ("покупател", "Покупатель"),
+    ("поставщик", "Поставщик"),
+    ("арендатор", "Арендатор"),
+    ("арендодатель", "Арендодатель"),
+    ("займодав", "Займодавец"),
+    ("заемщик", "Заемщик"),
+    ("заёмщик", "Заемщик"),
+)
+
+CONTRACT_TYPE_MARKERS = (
+    "договор",
+    "поручительств",
+    "поставк",
+    "аренд",
+    "услуг",
+    "подряд",
+    "займ",
+    "купл",
+    "продаж",
+    "контрактн",
+    "производств",
+    "агентск",
+    "лицензи",
+)
+
+GOAL_MARKERS = (
+    "цель",
+    "задача",
+    "нужно",
+    "надо",
+    "хочу",
+    "хотим",
+    "проверить",
+    "подготовить",
+    "снизить",
+    "минимизировать",
+    "убрать",
+)
+
+RISK_MARKERS = (
+    "риск",
+    "фокус",
+    "важно",
+    "обратить внимание",
+    "штраф",
+    "ответствен",
+    "убыт",
+    "срок",
+    "расторж",
+    "санкц",
+)
+
 
 @dataclass(frozen=True)
 class IntakeInterpretation:
@@ -75,11 +131,173 @@ def safe_state(state: dict[str, Any]) -> dict[str, Any]:
 def greeting_text() -> str:
     return (
         "Привет, я Марго, юрист.\n\n"
-        "Принимаю договор по ссылке на Google Docs, быстро задаю пару уточняющих вопросов и отправляю его на проверку. "
+        "Принимаю договор по ссылке на Google Docs и отправляю его на проверку. "
         "На выходе верну две ссылки: протокол разногласий и отчет по работе.\n\n"
-        "Чтобы начать, просто пришли ссылку на договор. Можно и голосом: «Марго, проверь договор». "
+        "Чтобы начать, пришли одним сообщением или голосом: ссылку на договор, тип договора, нашу сторону, цель проверки "
+        "и ключевые риски. Если чего-то не хватит, я уточню только недостающие пункты. "
         "Бюрократию оставим договору, нам она ни к чему."
     )
+
+
+def extract_intake_fields(
+    text: str,
+    *,
+    missing_fields: list[str] | tuple[str, ...],
+    current_question_key: str = "",
+) -> dict[str, str]:
+    """Extract several intake answers from one free-form user message."""
+    cleaned = re.sub(r"\s+", " ", text).strip(" \t\r\n")
+    if not cleaned:
+        return {}
+    missing = set(missing_fields)
+    extracted: dict[str, str] = {}
+    if "document_url" in missing:
+        match = GOOGLE_URL_PATTERN.search(cleaned)
+        if match:
+            extracted["document_url"] = match.group(0).rstrip(".,;")
+
+    for key, value in extract_labeled_intake_fields(text).items():
+        if key in missing and value and key not in extracted:
+            extracted[key] = value
+
+    remaining = GOOGLE_URL_PATTERN.sub(" ", cleaned)
+
+    if "contract_type" in missing and "contract_type" not in extracted:
+        candidate = infer_contract_type(remaining)
+        if candidate:
+            extracted["contract_type"] = candidate
+
+    if "user_side" in missing and "user_side" not in extracted:
+        candidate = infer_user_side(remaining)
+        if candidate:
+            extracted["user_side"] = candidate
+
+    if "goal" in missing and "goal" not in extracted:
+        candidate = infer_goal(remaining, current_question_key=current_question_key)
+        if candidate:
+            extracted["goal"] = candidate
+
+    if "risk_focus" in missing and "risk_focus" not in extracted:
+        candidate = infer_risk_focus(remaining, current_question_key=current_question_key)
+        if candidate:
+            extracted["risk_focus"] = candidate
+
+    if not extracted and current_question_key in missing:
+        extracted[current_question_key] = cleaned
+    return {key: value for key, value in extracted.items() if value.strip()}
+
+
+def extract_labeled_intake_fields(text: str) -> dict[str, str]:
+    labels = {
+        "document_url": r"(?:ссылка|линк|url|документ)",
+        "contract_type": r"(?:тип договора|тип)",
+        "user_side": r"(?:наша сторона|сторона клиента|сторона|мы)",
+        "goal": r"(?:цель проверки|цель|задача|что нужно сделать)",
+        "risk_focus": r"(?:риски|риск|фокус|важно|на что обратить внимание)",
+    }
+    label_pattern = re.compile(rf"(?P<label>{'|'.join(labels.values())})\s*[:\-—]", re.IGNORECASE)
+    matches = list(label_pattern.finditer(text))
+    extracted: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        label = match.group("label").lower()
+        key = ""
+        for candidate_key, pattern in labels.items():
+            if re.fullmatch(pattern, label, flags=re.IGNORECASE):
+                key = candidate_key
+                break
+        if not key:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        value = clean_extracted_value(text[match.end() : end])
+        if value:
+            extracted[key] = value
+    return extracted
+
+
+def infer_contract_type(text: str) -> str:
+    cleaned = clean_extracted_value(text)
+    lowered = cleaned.lower()
+    match = re.search(r"\b(договор\s+[^.,;\n]+)", cleaned, flags=re.IGNORECASE)
+    if match:
+        candidate = re.split(
+            r"\b(?:мы|наша сторона|сторона|цель|задача|риски|риск|фокус|нужно|надо|важно|проверить)\b",
+            match.group(1),
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        return clean_extracted_value(candidate)
+    if len(cleaned) <= 80 and any(marker in lowered for marker in CONTRACT_TYPE_MARKERS):
+        if not any(marker in lowered for marker in GOAL_MARKERS + RISK_MARKERS):
+            return normalize_intake_answer("contract_type", cleaned)
+    return ""
+
+
+def infer_user_side(text: str) -> str:
+    explicit = re.search(
+        r"(?:мы|наша сторона|сторона клиента|на стороне|выступаем как|являемся)\s*(?:это|по договору|:|-|—)?\s*([^.,;\n]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if explicit:
+        side = canonical_side_from_text(explicit.group(1))
+        if side:
+            return side
+    return canonical_side_from_text(text, require_context=True)
+
+
+def infer_goal(text: str, *, current_question_key: str = "") -> str:
+    cleaned = clean_extracted_value(text)
+    match = re.search(
+        r"(?:цель|задача|нужно|надо|хочу|хотим)\s*(?:проверки|:|-|—)?\s*([^.;\n]+(?:[.;]\s*[^.;\n]+)?)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        candidate = re.split(
+            r"[,;]\s*(?:риски|риск|фокус|важно|обратить внимание)\b",
+            match.group(1),
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        return clean_extracted_value(candidate)
+    lowered = cleaned.lower()
+    if current_question_key == "goal":
+        return cleaned
+    if len(cleaned) >= 12 and any(marker in lowered for marker in GOAL_MARKERS):
+        return cleaned
+    return ""
+
+
+def infer_risk_focus(text: str, *, current_question_key: str = "") -> str:
+    cleaned = clean_extracted_value(text)
+    match = re.search(
+        r"(?:риски|риск|фокус|важно|обратить внимание)\s*(?:проверки|:|-|—|на)?\s*([^;\n]+)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return clean_extracted_value(match.group(1))
+    lowered = cleaned.lower()
+    if current_question_key == "risk_focus":
+        return cleaned
+    if len(cleaned) >= 10 and any(marker in lowered for marker in RISK_MARKERS):
+        return cleaned
+    return ""
+
+
+def clean_extracted_value(text: str) -> str:
+    value = re.sub(r"\s+", " ", text).strip(" \t\r\n-—:;,.")
+    return value[:500].strip()
+
+
+def canonical_side_from_text(text: str, *, require_context: bool = False) -> str:
+    lowered = text.lower()
+    if require_context and not any(marker in lowered for marker in ("мы", "сторон", "клиент", "выступ", "являем")):
+        return ""
+    for marker, value in SIDE_ALIASES:
+        if marker in lowered:
+            return value
+    return ""
 
 
 def interpret_intake_answer(
@@ -117,21 +335,9 @@ def normalize_intake_answer(question_key: str, text: str) -> str:
         match = GOOGLE_URL_PATTERN.search(cleaned)
         return match.group(0).rstrip(".,;") if match else cleaned
     if question_key == "user_side":
-        lowered = cleaned.lower()
-        side_aliases = (
-            ("поручител", "Поручитель"),
-            ("исполнител", "Исполнитель"),
-            ("заказчик", "Заказчик"),
-            ("покупател", "Покупатель"),
-            ("поставщик", "Поставщик"),
-            ("арендатор", "Арендатор"),
-            ("арендодатель", "Арендодатель"),
-            ("займодав", "Займодавец"),
-            ("заемщик", "Заемщик"),
-        )
-        for marker, value in side_aliases:
-            if marker in lowered:
-                return value
+        side = infer_user_side(cleaned) or canonical_side_from_text(cleaned)
+        if side:
+            return side
     if question_key == "contract_type":
         cleaned = re.sub(r"^(это|тип договора|договор)\s*[:\-—]?\s*", "", cleaned, flags=re.IGNORECASE).strip()
         if cleaned and "договор" not in cleaned.lower():
@@ -186,6 +392,6 @@ def fallback_answer(message: str) -> str:
         return greeting_text()
     return (
         "Я Марго, юрист, и работаю строго в рамках проверки одного договора. "
-        "Чтобы начать, пришли ссылку на Google Docs или Google Drive. Потом я быстро уточню тип договора, нашу сторону, "
-        "цель проверки и риски, которые нужно ограничить. На выходе верну две ссылки: протокол разногласий и отчет по работе."
+        "Чтобы начать, пришли одним сообщением или голосом ссылку на Google Docs/Drive, тип договора, нашу сторону, "
+        "цель проверки и ключевые риски. На выходе верну две ссылки: протокол разногласий и отчет по работе."
     )
