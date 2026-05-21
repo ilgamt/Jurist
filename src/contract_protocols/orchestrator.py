@@ -1207,7 +1207,6 @@ def render_protocol_markdown(protocol: dict, case_metadata: dict | None = None) 
 def render_protocol_header(case_metadata: dict | None = None) -> list[str]:
     intake = case_metadata.get("intake", {}) if isinstance(case_metadata, dict) else {}
     contract_title = protocol_contract_title(intake)
-    user_side = clean_protocol_header_value(intake.get("user_side"))
     counterparty = clean_protocol_header_value(intake.get("counterparty"))
     lines = [
         "# ПРОТОКОЛ РАЗНОГЛАСИЙ",
@@ -1217,8 +1216,6 @@ def render_protocol_header(case_metadata: dict | None = None) -> list[str]:
         "«___» __________ 20__ г.",
         "",
     ]
-    if user_side:
-        lines.extend([f"Сторона, в интересах которой подготовлен протокол: **{user_side}**.", ""])
     if counterparty:
         lines.extend([f"Контрагент по договору: **{counterparty}**.", ""])
     lines.extend(

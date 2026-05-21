@@ -94,7 +94,7 @@ class OrchestratorTest(unittest.TestCase):
 
         self.assertIn("# ПРОТОКОЛ РАЗНОГЛАСИЙ", markdown)
         self.assertIn("к проекту договора «Договор на монтажные услуги» № ____", markdown)
-        self.assertIn("Сторона, в интересах которой подготовлен протокол: **Заказчик**.", markdown)
+        self.assertNotIn("Сторона, в интересах которой подготовлен протокол", markdown)
         self.assertIn("неотъемлемой частью Договора", markdown)
         self.assertNotIn("Версия:", markdown)
 
