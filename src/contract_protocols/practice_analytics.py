@@ -568,7 +568,8 @@ def attach_practice_to_protocol(case_id: str, practice_payload: dict[str, Any]) 
 
     from contract_protocols.orchestrator import render_proposed_clauses_markdown, render_protocol_markdown
 
-    protocol_markdown = render_protocol_markdown(protocol)
+    metadata = load_json_if_exists(output_path(case_id, "final_protocol.json").parents[1] / "metadata.json")
+    protocol_markdown = render_protocol_markdown(protocol, metadata)
     proposed_clauses = render_proposed_clauses_markdown(protocol)
     atomic_write_json(output_path(case_id, "final_protocol.json"), protocol)
     atomic_write_text(output_path(case_id, "final_protocol.md"), protocol_markdown)

@@ -5,7 +5,13 @@ import unittest
 from pathlib import Path
 
 from contract_protocols.config import service_path
-from contract_protocols.orchestrator import IntakeError, extract_clauses, normalize_disagreement_protocol, run_fake_case
+from contract_protocols.orchestrator import (
+    IntakeError,
+    extract_clauses,
+    normalize_disagreement_protocol,
+    render_protocol_markdown,
+    run_fake_case,
+)
 from contract_protocols.research_plan import ResearchInputs
 
 
@@ -64,6 +70,33 @@ class OrchestratorTest(unittest.TestCase):
         self.assertIn("переговорный стратег", module_conclusions)
         proposed_clauses = (case_dir / "outputs" / "proposed_clauses.md").read_text(encoding="utf-8")
         self.assertIn("Предлагаемые редакции пунктов", proposed_clauses)
+
+    def test_protocol_markdown_uses_legal_header(self):
+        markdown = render_protocol_markdown(
+            {
+                "protocol_version": "draft-0.1",
+                "items": [
+                    {
+                        "clause_reference": "1.1",
+                        "current_wording": "Текущая редакция",
+                        "proposed_wording": "Предлагаемая редакция",
+                        "rationale": "Обоснование",
+                    }
+                ],
+            },
+            {
+                "intake": {
+                    "contract_type": "Договор на монтажные услуги",
+                    "user_side": "Заказчик",
+                }
+            },
+        )
+
+        self.assertIn("# ПРОТОКОЛ РАЗНОГЛАСИЙ", markdown)
+        self.assertIn("к проекту договора «Договор на монтажные услуги» № ____", markdown)
+        self.assertIn("Сторона, в интересах которой подготовлен протокол: **Заказчик**.", markdown)
+        self.assertIn("неотъемлемой частью Договора", markdown)
+        self.assertNotIn("Версия:", markdown)
 
     def test_run_fake_case_accepts_research_inputs(self):
         metadata = run_fake_case(

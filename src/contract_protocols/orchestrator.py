@@ -395,7 +395,7 @@ class CaseRunner:
             )
             protocol = enrich_protocol_with_practice(case.case_id, protocol)
             validate_named(protocol, "disagreement_protocol.schema.json")
-            protocol_markdown = render_protocol_markdown(protocol)
+            protocol_markdown = render_protocol_markdown(protocol, case.metadata())
             proposed_clauses = render_proposed_clauses_markdown(protocol)
             module_conclusions = render_module_conclusions(case)
             evidence_markdown = render_evidence_pack_markdown(case)
@@ -1183,12 +1183,9 @@ def normalize_confidence(value) -> float:
     return min(1.0, max(0.0, number))
 
 
-def render_protocol_markdown(protocol: dict) -> str:
+def render_protocol_markdown(protocol: dict, case_metadata: dict | None = None) -> str:
     lines = [
-        "# Протокол разногласий",
-        "",
-        f"Версия: `{version_title(protocol['protocol_version'])}`",
-        "",
+        *render_protocol_header(case_metadata),
         "| Пункт | Текущая редакция | Наша редакция | Обоснование |",
         "| --- | --- | --- | --- |",
     ]
@@ -1205,6 +1202,49 @@ def render_protocol_markdown(protocol: dict) -> str:
         lines.extend(["", "## Вопросы для уточнения", ""])
         lines.extend(f"- {question}" for question in protocol["unresolved_questions"])
     return "\n".join(lines) + "\n"
+
+
+def render_protocol_header(case_metadata: dict | None = None) -> list[str]:
+    intake = case_metadata.get("intake", {}) if isinstance(case_metadata, dict) else {}
+    contract_title = protocol_contract_title(intake)
+    user_side = clean_protocol_header_value(intake.get("user_side"))
+    counterparty = clean_protocol_header_value(intake.get("counterparty"))
+    lines = [
+        "# ПРОТОКОЛ РАЗНОГЛАСИЙ",
+        f"к {contract_title} № ____ от «___» __________ 20__ г.",
+        "",
+        "г. ____________  ",
+        "«___» __________ 20__ г.",
+        "",
+    ]
+    if user_side:
+        lines.extend([f"Сторона, в интересах которой подготовлен протокол: **{user_side}**.", ""])
+    if counterparty:
+        lines.extend([f"Контрагент по договору: **{counterparty}**.", ""])
+    lines.extend(
+        [
+            (
+                "Стороны составили настоящий Протокол разногласий к указанному договору "
+                "(далее — «Договор») о нижеследующем. Условия Договора, по которым имеются "
+                "разногласия, предлагается изложить в редакции, указанной в таблице ниже. "
+                "Условия Договора, не затронутые настоящим Протоколом, остаются без изменений. "
+                "После подписания Сторонами настоящий Протокол является неотъемлемой частью Договора."
+            ),
+            "",
+        ]
+    )
+    return lines
+
+
+def protocol_contract_title(intake: dict) -> str:
+    contract_type = clean_protocol_header_value(intake.get("contract_type"))
+    if contract_type:
+        return f"проекту договора «{contract_type}»"
+    return "проекту договора"
+
+
+def clean_protocol_header_value(value) -> str:
+    return " ".join(str(value or "").split()).strip(" .;:-")
 
 
 def render_proposed_clauses_markdown(protocol: dict) -> str:
