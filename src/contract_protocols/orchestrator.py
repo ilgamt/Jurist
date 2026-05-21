@@ -387,7 +387,12 @@ class CaseRunner:
             from contract_protocols.practice_analytics import enrich_protocol_with_practice
             from contract_protocols.practice_analytics import render_clause_practice_statuses
 
-            protocol = normalize_disagreement_protocol(protocol, case.case_id, fallback_outputs=case.role_outputs)
+            protocol = normalize_disagreement_protocol(
+                protocol,
+                case.case_id,
+                fallback_outputs=case.role_outputs,
+                source_clauses=case.clauses,
+            )
             protocol = enrich_protocol_with_practice(case.case_id, protocol)
             validate_named(protocol, "disagreement_protocol.schema.json")
             protocol_markdown = render_protocol_markdown(protocol)
@@ -1023,14 +1028,16 @@ def normalize_disagreement_protocol(
     protocol: dict,
     case_id: str,
     fallback_outputs: dict[str, dict] | None = None,
+    source_clauses: list[dict] | None = None,
 ) -> dict:
     protocol = protocol_with_fallback_items(protocol, fallback_outputs or {})
+    clause_texts = clause_text_by_reference(source_clauses or [])
     normalized = {
         "schema_version": "0.1",
         "case_id": str(protocol.get("case_id") or case_id),
         "protocol_version": str(protocol.get("protocol_version") or "draft-0.1"),
         "items": [
-            normalize_disagreement_item(item, index)
+            normalize_disagreement_item(item, index, clause_texts=clause_texts)
             for index, item in enumerate(protocol_items(protocol), start=1)
             if isinstance(item, dict)
         ],
@@ -1048,44 +1055,70 @@ def protocol_with_fallback_items(protocol: dict, fallback_outputs: dict[str, dic
     if protocol_items(protocol):
         return protocol
     for phase in ("revision", "draft_protocol"):
-        candidate = fallback_outputs.get(phase, {}).get("content", {})
-        if isinstance(candidate, dict) and isinstance(candidate.get("protocol"), dict):
-            candidate_protocol = candidate["protocol"]
-            if protocol_items(candidate_protocol):
-                return candidate_protocol
-        for key in ("revised_items", "draft_items"):
-            if isinstance(candidate, dict) and isinstance(candidate.get(key), list) and candidate[key]:
-                copied = dict(protocol)
-                copied["items"] = candidate[key]
-                return copied
+        for candidate in protocol_fallback_candidates(fallback_outputs.get(phase, {})):
+            if isinstance(candidate.get("protocol"), dict):
+                candidate_protocol = candidate["protocol"]
+                if protocol_items(candidate_protocol):
+                    return candidate_protocol
+            for key in ("revised_items", "draft_items"):
+                if isinstance(candidate.get(key), list) and candidate[key]:
+                    copied = dict(protocol)
+                    copied["items"] = candidate[key]
+                    return copied
     return protocol
 
 
+def protocol_fallback_candidates(output: dict) -> list[dict]:
+    if not isinstance(output, dict):
+        return []
+    candidates = [output]
+    content = output.get("content")
+    if isinstance(content, dict):
+        candidates.append(content)
+    return candidates
+
+
+def clause_text_by_reference(clauses: list[dict]) -> dict[str, str]:
+    clause_texts: dict[str, str] = {}
+    for clause in clauses:
+        if not isinstance(clause, dict):
+            continue
+        reference = str(clause.get("clause_reference") or clause.get("clause_id") or "").strip()
+        text = str(clause.get("text") or clause.get("heading") or "").strip()
+        if reference and text:
+            clause_texts.setdefault(reference, text)
+    return clause_texts
+
+
 def protocol_items(protocol: dict) -> list:
-    for key in ("items", "disagreements", "rows"):
+    for key in ("items", "disagreements", "rows", "edits"):
         value = protocol.get(key)
         if isinstance(value, list) and value:
             return value
     return []
 
 
-def normalize_disagreement_item(item: dict, index: int) -> dict:
+def normalize_disagreement_item(item: dict, index: int, *, clause_texts: dict[str, str] | None = None) -> dict:
     priority = normalize_priority(item.get("priority"))
+    clause_reference = str(item.get("clause_reference") or item.get("clause_id") or "not_set")
+    current_wording = str(
+        item.get("current_wording")
+        or item.get("current_text")
+        or item.get("counterparty_wording")
+        or item.get("counterparty_text")
+        or item.get("contractor_version")
+        or item.get("original_wording")
+        or item.get("original_text")
+        or item.get("original_clause_text")
+        or item.get("source_text")
+        or ""
+    )
+    if not current_wording.strip() and clause_texts:
+        current_wording = clause_texts.get(clause_reference, current_wording)
     return {
         "item_id": str(item.get("item_id") or item.get("item_no") or f"item_{index}"),
-        "clause_reference": str(item.get("clause_reference") or item.get("clause_id") or "not_set"),
-        "current_wording": str(
-            item.get("current_wording")
-            or item.get("current_text")
-            or item.get("counterparty_wording")
-            or item.get("counterparty_text")
-            or item.get("contractor_version")
-            or item.get("original_wording")
-            or item.get("original_text")
-            or item.get("original_clause_text")
-            or item.get("source_text")
-            or ""
-        ),
+        "clause_reference": clause_reference,
+        "current_wording": current_wording,
         "proposed_wording": str(
             item.get("proposed_wording")
             or item.get("proposed_text")

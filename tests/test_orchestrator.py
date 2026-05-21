@@ -139,6 +139,73 @@ class OrchestratorTest(unittest.TestCase):
         self.assertEqual(protocol["items"][0]["current_wording"], "Редакция контрагента")
         self.assertEqual(protocol["items"][0]["proposed_wording"], "Наша редакция")
 
+    def test_normalize_disagreement_protocol_accepts_edit_rows(self):
+        protocol = normalize_disagreement_protocol(
+            {
+                "edits": [
+                    {
+                        "clause_reference": "1.5",
+                        "current_text": "Текущая редакция",
+                        "proposed_text": "Предлагаемая редакция",
+                        "rationale": "Обоснование",
+                    }
+                ]
+            },
+            "case_test",
+        )
+
+        self.assertEqual(len(protocol["items"]), 1)
+        self.assertEqual(protocol["items"][0]["clause_reference"], "1.5")
+        self.assertEqual(protocol["items"][0]["current_wording"], "Текущая редакция")
+        self.assertEqual(protocol["items"][0]["proposed_wording"], "Предлагаемая редакция")
+
+    def test_normalize_disagreement_protocol_fills_current_wording_from_clauses(self):
+        protocol = normalize_disagreement_protocol(
+            {
+                "edits": [
+                    {
+                        "clause_reference": "1.5",
+                        "proposed_text": "Предлагаемая редакция",
+                        "rationale": "Обоснование",
+                    }
+                ]
+            },
+            "case_test",
+            source_clauses=[
+                {
+                    "clause_reference": "1.5",
+                    "text": "1.5. Текущая редакция из договора.",
+                }
+            ],
+        )
+
+        self.assertEqual(protocol["items"][0]["current_wording"], "1.5. Текущая редакция из договора.")
+
+    def test_normalize_disagreement_protocol_uses_nested_edit_fallback(self):
+        protocol = normalize_disagreement_protocol(
+            {"items": []},
+            "case_test",
+            fallback_outputs={
+                "revision": {
+                    "content": {
+                        "protocol": {
+                            "edits": [
+                                {
+                                    "clause_reference": "2.1",
+                                    "proposed_text": "Уточнить порядок приемки работ.",
+                                    "rationale": "Нужна проверяемая процедура приемки.",
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+        )
+
+        self.assertEqual(len(protocol["items"]), 1)
+        self.assertEqual(protocol["items"][0]["clause_reference"], "2.1")
+        self.assertEqual(protocol["items"][0]["proposed_wording"], "Уточнить порядок приемки работ.")
+
     def test_normalize_disagreement_protocol_accepts_text_aliases(self):
         protocol = normalize_disagreement_protocol(
             {
