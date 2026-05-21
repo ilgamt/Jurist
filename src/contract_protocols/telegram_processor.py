@@ -72,6 +72,23 @@ def process_request(
             "reason": "request was already claimed",
         }
     log_event("telegram_request_processing_started", telegram_id=request["telegram_id"], request_id=request_id, db_path=db_path)
+    if notify:
+        try:
+            notify_request_processing_started(request)
+            log_event(
+                "telegram_request_processing_start_notified",
+                telegram_id=request["telegram_id"],
+                request_id=request_id,
+                db_path=db_path,
+            )
+        except Exception as error:
+            log_event(
+                "telegram_request_processing_start_notification_failed",
+                telegram_id=request["telegram_id"],
+                request_id=request_id,
+                payload={"error_type": type(error).__name__, "error": str(error)},
+                db_path=db_path,
+            )
     try:
         result = run_contract_review_for_request(request, live=live, case_budget_usd=case_budget_usd)
         save_request_result(
@@ -172,6 +189,22 @@ def run_contract_review_for_request(
         "work_report_doc_url": report_url,
         "google_folder_url": google_folder_url(export.get("parent_folder_id", "")),
     }
+
+
+def notify_request_processing_started(request: dict[str, Any]) -> None:
+    token = telegram_token()
+    if not token:
+        return
+    TelegramAPI(token).send_message(
+        int(request["telegram_id"]),
+        "\n".join(
+            [
+                f"Проверка договора по заявке #{request['id']} началась.",
+                "Обычно она занимает несколько минут, но для объемных договоров может идти до 30 минут.",
+                "Когда проверка завершится, я пришлю протокол разногласий и отчет по работе отдельным сообщением.",
+            ]
+        ),
+    )
 
 
 def notify_request_completed(request: dict[str, Any], result: dict[str, Any]) -> None:

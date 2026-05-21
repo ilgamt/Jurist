@@ -16,6 +16,7 @@ from contract_protocols.telegram_db import (
 from contract_protocols.telegram_processor import process_ready_requests
 from contract_protocols.telegram_processor import process_request
 from contract_protocols.telegram_processor import notify_request_failed
+from contract_protocols.telegram_processor import notify_request_processing_started
 
 
 class TelegramProcessorTest(unittest.TestCase):
@@ -101,6 +102,61 @@ class TelegramProcessorTest(unittest.TestCase):
             self.assertEqual(result["status"], "failed")
             self.assertEqual(loaded["status"], "failed")
             self.assertIn("provider timed out", loaded["error_message"])
+
+    def test_process_request_notifies_when_processing_starts(self):
+        sent = []
+
+        class FakeAPI:
+            def __init__(self, _token):
+                pass
+
+            def send_message(self, chat_id, text):
+                sent.append((chat_id, text))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "jurist.db"
+            init_db(db_path)
+            upsert_user(1001, username="reviewer", db_path=db_path)
+            set_user_status(1001, "approved", db_path=db_path)
+            request = create_request(1001, status="ready", db_path=db_path)
+
+            with patch("contract_protocols.telegram_processor.telegram_token", return_value="token"):
+                with patch("contract_protocols.telegram_processor.TelegramAPI", FakeAPI):
+                    with patch(
+                        "contract_protocols.telegram_processor.run_contract_review_for_request",
+                        return_value={
+                            "case_id": "case_1",
+                            "protocol_doc_url": "https://docs.google.com/document/d/protocol/edit",
+                            "work_report_doc_url": "https://docs.google.com/document/d/report/edit",
+                            "google_folder_url": "https://drive.google.com/drive/folders/folder_1",
+                        },
+                    ):
+                        with patch("contract_protocols.telegram_processor.build_cases_dashboard"):
+                            result = process_request(request["id"], notify=True, db_path=db_path)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(sent[0][0], 1001)
+        self.assertIn("Проверка договора по заявке", sent[0][1])
+        self.assertIn("до 30 минут", sent[0][1])
+        self.assertIn("Проверка договора завершена.", sent[1][1])
+
+    def test_processing_start_notification_text(self):
+        sent = []
+
+        class FakeAPI:
+            def __init__(self, _token):
+                pass
+
+            def send_message(self, chat_id, text):
+                sent.append((chat_id, text))
+
+        with patch("contract_protocols.telegram_processor.telegram_token", return_value="token"):
+            with patch("contract_protocols.telegram_processor.TelegramAPI", FakeAPI):
+                notify_request_processing_started({"id": 42, "telegram_id": 1001})
+
+        self.assertEqual(sent[0][0], 1001)
+        self.assertIn("#42", sent[0][1])
+        self.assertIn("до 30 минут", sent[0][1])
 
     def test_failed_notification_does_not_expose_raw_error(self):
         sent = []
